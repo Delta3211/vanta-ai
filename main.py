@@ -6,11 +6,12 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md_to_text
-from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal, QPropertyAnimation, pyqtProperty, QEasingCurve
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QTextDocument
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -71,7 +72,9 @@ def extract_file_text(path: str) -> str:
 APP_NAME = "Sierra"
 APP_VERSION = "1.0"
 MODEL_NAME = "llama3"
+LUNA_MODEL_NAME = "qwen2.5-coder:14b"
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "sierra-desert-icon.png"
+LUNA_ICON_PATH = Path(__file__).resolve().parent / "assets" / "luna-icon.png"
 CHATS_DIR = Path.home() / ".sierra" / "chats"
 CHATS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -103,12 +106,13 @@ class ChatThread(QThread):
     stream_chunk = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, messages, use_search=False, stream=False, temperature=0.7):
+    def __init__(self, messages, use_search=False, stream=False, temperature=0.7, model=None):
         super().__init__()
         self.messages = list(messages)
         self.use_search = use_search
         self.stream = stream
         self.temperature = temperature
+        self.model = model or MODEL_NAME
 
     def run(self):
         try:
@@ -127,7 +131,7 @@ class ChatThread(QThread):
 
             if self.stream:
                 # Streaming response
-                llm = ChatOllama(model=MODEL_NAME, temperature=self.temperature)
+                llm = ChatOllama(model=self.model, temperature=self.temperature)
                 full_response = ""
                 for chunk in llm.stream(self.messages):
                     if hasattr(chunk, 'content'):
@@ -137,7 +141,7 @@ class ChatThread(QThread):
                 self.response_ready.emit(full_response)
             else:
                 # Non-streaming response
-                answer = ChatOllama(model=MODEL_NAME, temperature=self.temperature).invoke(self.messages)
+                answer = ChatOllama(model=self.model, temperature=self.temperature).invoke(self.messages)
                 self.response_ready.emit(str(answer.content))
         except Exception as exc:
             self.error.emit(str(exc))
@@ -146,23 +150,20 @@ class ChatThread(QThread):
 class SierraMark(QLabel):
     """Display the supplied desert icon with a gradient background."""
 
-    def __init__(self, size=52, parent=None):
+    def __init__(self, size=52, luna=False, parent=None):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.setAlignment(Qt.AlignCenter)
         self._size = size
-        pixmap = QPixmap(str(ICON_PATH))
+        self._luna = luna
+        icon_path = LUNA_ICON_PATH if luna and LUNA_ICON_PATH.exists() else ICON_PATH
+        pixmap = QPixmap(str(icon_path))
         if pixmap.isNull():
-            self.setText("S")
+            self.setText("L" if luna else "S")
             self.setObjectName("iconFallback")
             return
         self.setPixmap(
-            pixmap.scaled(
-                size,
-                size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
+            pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         )
 
     def paintEvent(self, event):
@@ -171,10 +172,15 @@ class SierraMark(QLabel):
         painter.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
         path.addRoundedRect(0, 0, self._size, self._size, self._size * 0.23, self._size * 0.23)
-        grad = QLinearGradient(0, 0, self._size, self._size)
-        grad.setColorAt(0.0, QColor("#C87838"))
-        grad.setColorAt(0.5, QColor("#8B4520"))
-        grad.setColorAt(1.0, QColor("#4A1E08"))
+        if self._luna:
+            grad = QLinearGradient(0, 0, self._size, self._size)
+            grad.setColorAt(0.0, QColor("#0A1040"))
+            grad.setColorAt(1.0, QColor("#050820"))
+        else:
+            grad = QLinearGradient(0, 0, self._size, self._size)
+            grad.setColorAt(0.0, QColor("#C87838"))
+            grad.setColorAt(0.5, QColor("#8B4520"))
+            grad.setColorAt(1.0, QColor("#4A1E08"))
         painter.fillPath(path, grad)
         painter.end()
         super().paintEvent(event)
@@ -188,22 +194,38 @@ class GradientFrame(QFrame):
 
     def paintEvent(self, event):
         from PyQt5.QtGui import QPainter, QLinearGradient, QColor, QPainterPath
+        from PyQt5.QtWidgets import QApplication
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        # Draw gradient border
-        grad = QLinearGradient(0, 0, w, h)
-        grad.setColorAt(0.0, QColor("#D4874A"))
-        grad.setColorAt(0.5, QColor("#8B4520"))
-        grad.setColorAt(1.0, QColor("#5A2A0C"))
+        # Detect Luna mode from the main window
+        use_luna = False
+        app = QApplication.instance()
+        if app:
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'use_luna'):
+                    use_luna = widget.use_luna
+                    break
+        if use_luna:
+            grad = QLinearGradient(0, 0, w, h)
+            grad.setColorAt(0.0, QColor("#4A70D8"))
+            grad.setColorAt(0.5, QColor("#1A3A90"))
+            grad.setColorAt(1.0, QColor("#0A1A50"))
+        else:
+            grad = QLinearGradient(0, 0, w, h)
+            grad.setColorAt(0.0, QColor("#D4874A"))
+            grad.setColorAt(0.5, QColor("#8B4520"))
+            grad.setColorAt(1.0, QColor("#5A2A0C"))
         outer = QPainterPath()
         outer.addRoundedRect(0, 0, w, h, 12, 12)
         inner = QPainterPath()
         inner.addRoundedRect(1.5, 1.5, w - 3, h - 3, 11, 11)
         border_path = outer - inner
         painter.fillPath(border_path, grad)
-        # Fill interior
-        painter.fillPath(inner, QColor("#18130F"))
+        if use_luna:
+            painter.fillPath(inner, QColor("#060A20"))
+        else:
+            painter.fillPath(inner, QColor("#18130F"))
         painter.end()
 
 
@@ -357,6 +379,7 @@ class RecentChat(QPushButton):
 class Sidebar(QFrame):
     new_chat_requested = pyqtSignal()
     search_toggled = pyqtSignal(bool)
+    luna_toggled = pyqtSignal(bool)
     chat_loaded = pyqtSignal(str)  # Signal with file path
 
     def __init__(self, parent=None):
@@ -372,15 +395,16 @@ class Sidebar(QFrame):
 
         brand_row = QHBoxLayout()
         brand_row.setSpacing(12)
-        brand_row.addWidget(SierraMark(48))
+        self.brand_icon = SierraMark(48)
+        brand_row.addWidget(self.brand_icon)
         brand_copy = QVBoxLayout()
         brand_copy.setSpacing(2)
-        wordmark = QLabel(f"{APP_NAME} <span>{APP_VERSION}</span>")
-        wordmark.setObjectName("wordmark")
-        descriptor = QLabel("Your local Llama assistant")
-        descriptor.setObjectName("brandDescription")
-        brand_copy.addWidget(wordmark)
-        brand_copy.addWidget(descriptor)
+        self.wordmark = QLabel(f"{APP_NAME} <span>{APP_VERSION}</span>")
+        self.wordmark.setObjectName("wordmark")
+        self.descriptor = QLabel("Your local Llama assistant")
+        self.descriptor.setObjectName("brandDescription")
+        brand_copy.addWidget(self.wordmark)
+        brand_copy.addWidget(self.descriptor)
         brand_row.addLayout(brand_copy)
         brand_row.addStretch()
         layout.addLayout(brand_row)
@@ -396,6 +420,12 @@ class Sidebar(QFrame):
         self.search.toggled.connect(self._search_toggled)
         self.search.clicked.connect(lambda checked=False: self._select(self.search))
         layout.addWidget(self.search)
+
+        self.luna_button = NavButton("🌙", "Luna  —  Coding AI")
+        self.luna_button.setObjectName("lunaButton")
+        self.luna_button.setCheckable(True)
+        self.luna_button.toggled.connect(self._luna_toggled)
+        layout.addWidget(self.luna_button)
 
         divider = QFrame()
         divider.setObjectName("sidebarDivider")
@@ -422,17 +452,18 @@ class Sidebar(QFrame):
         model_layout = QHBoxLayout(model_card)
         model_layout.setContentsMargins(10, 11, 9, 11)
         model_layout.setSpacing(10)
-        model_layout.addWidget(SierraMark(42))
+        self.model_card_icon = SierraMark(42)
+        model_layout.addWidget(self.model_card_icon)
         model_copy = QVBoxLayout()
         model_copy.setSpacing(1)
-        model_title = QLabel(f"{APP_NAME} {APP_VERSION}")
-        model_title.setObjectName("sidebarModelTitle")
-        model_subtitle = QLabel("Llama 3 · 8B · Local")
-        model_subtitle.setObjectName("sidebarModelSubtitle")
+        self.model_card_title = QLabel(f"{APP_NAME} {APP_VERSION}")
+        self.model_card_title.setObjectName("sidebarModelTitle")
+        self.model_card_subtitle = QLabel("Llama 3 · 8B · Local")
+        self.model_card_subtitle.setObjectName("sidebarModelSubtitle")
         online = QLabel("●  Online")
         online.setObjectName("onlineIndicator")
-        model_copy.addWidget(model_title)
-        model_copy.addWidget(model_subtitle)
+        model_copy.addWidget(self.model_card_title)
+        model_copy.addWidget(self.model_card_subtitle)
         model_copy.addWidget(online)
         model_layout.addLayout(model_copy)
         model_layout.addStretch()
@@ -440,6 +471,31 @@ class Sidebar(QFrame):
         chevron.setObjectName("cardChevron")
         model_layout.addWidget(chevron)
         layout.addWidget(model_card)
+
+    def update_branding(self, luna=False):
+        """Swap sidebar logo, wordmark and model card between Sierra and Luna."""
+        from PyQt5.QtGui import QPixmap
+        icon_path = LUNA_ICON_PATH if luna and LUNA_ICON_PATH.exists() else ICON_PATH
+        pixmap = QPixmap(str(icon_path))
+        size_brand = self.brand_icon._size
+        size_card  = self.model_card_icon._size
+        if not pixmap.isNull():
+            self.brand_icon.setPixmap(pixmap.scaled(size_brand, size_brand, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.model_card_icon.setPixmap(pixmap.scaled(size_card, size_card, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.brand_icon._luna = luna
+        self.model_card_icon._luna = luna
+        self.brand_icon.update()
+        self.model_card_icon.update()
+        if luna:
+            self.wordmark.setText("Luna <span>1.0</span>")
+            self.descriptor.setText("Your local coding AI")
+            self.model_card_title.setText("Luna 1.0")
+            self.model_card_subtitle.setText("Qwen 2.5 Coder · 14B · Local")
+        else:
+            self.wordmark.setText(f"{APP_NAME} <span>{APP_VERSION}</span>")
+            self.descriptor.setText("Your local Llama assistant")
+            self.model_card_title.setText(f"{APP_NAME} {APP_VERSION}")
+            self.model_card_subtitle.setText("Llama 3 · 8B · Local")
 
     def _new_chat(self):
         self._select(self.new_chat)
@@ -457,6 +513,10 @@ class Sidebar(QFrame):
     def _search_toggled(self, enabled):
         self.search.setText("⌕    Search  ON" if enabled else "⌕    Search")
         self.search_toggled.emit(enabled)
+
+    def _luna_toggled(self, enabled):
+        self.luna_button.setText("🌙    Luna  ON" if enabled else "🌙    Luna  —  Coding AI")
+        self.luna_toggled.emit(enabled)
 
     def _load_recent_chats(self):
         """Load and display recent saved chats"""
@@ -559,8 +619,9 @@ class ActionCard(QPushButton):
 class WelcomeView(QWidget):
     prompt_chosen = pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, luna=False, parent=None):
         super().__init__(parent)
+        self._luna = luna
         self._build()
 
     def _build(self):
@@ -571,35 +632,51 @@ class WelcomeView(QWidget):
 
         mark_row = QHBoxLayout()
         mark_row.addStretch()
-        mark_row.addWidget(SierraMark(94))
+        mark_row.addWidget(SierraMark(94, luna=self._luna))
         mark_row.addStretch()
         layout.addLayout(mark_row)
         layout.addSpacing(22)
 
-        title = QLabel(f"{APP_NAME} <span>{APP_VERSION}</span>")
+        if self._luna:
+            title = QLabel("Luna <span>1.0</span>")
+            subtitle_text = "Your local coding AI assistant."
+            desc_text = "Write, debug, and understand code with a model built for developers."
+        else:
+            title = QLabel(f"{APP_NAME} <span>{APP_VERSION}</span>")
+            subtitle_text = "Your local Llama assistant."
+            desc_text = "Ask me anything, get help with your ideas, or just have a conversation."
+
         title.setObjectName("heroTitle")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
-        subtitle = QLabel("Your local Llama assistant.")
+        subtitle = QLabel(subtitle_text)
         subtitle.setObjectName("heroSubtitle")
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
         layout.addSpacing(25)
-        description = QLabel("Ask me anything, get help with your ideas, or just have a conversation.")
+        description = QLabel(desc_text)
         description.setObjectName("heroDescription")
         description.setAlignment(Qt.AlignCenter)
         layout.addWidget(description)
         layout.addSpacing(46)
 
+        if self._luna:
+            entries = (
+                ("</>", "Write code", "Generate clean, production-ready code.", "Write clean code for: "),
+                ("🐛", "Debug", "Find and fix bugs fast.", "Debug this code and explain the fix: "),
+                ("▤", "Explain", "Understand any code or concept.", "Explain this code in simple terms: "),
+                ("⚡", "Optimise", "Make code faster and cleaner.", "Optimise this code for performance: "),
+            )
+        else:
+            entries = (
+                ("◉", "Get answers", "Ask questions about anything.", "Answer this question clearly: "),
+                ("</>", "Write code", "Debug, build, or learn to code.", "Help me write clean code for: "),
+                ("▤", "Summarise", "Turn long text into short summaries.", "Summarise the following in clear bullet points: "),
+                ("✦", "Be creative", "Brainstorm ideas and more.", "Brainstorm original ideas for: "),
+            )
         cards = QGridLayout()
         cards.setHorizontalSpacing(18)
         cards.setVerticalSpacing(17)
-        entries = (
-            ("◉", "Get answers", "Ask questions about anything.", "Answer this question clearly: "),
-            ("</>", "Write code", "Debug, build, or learn to code.", "Help me write clean code for: "),
-            ("▤", "Summarise", "Turn long text into short summaries.", "Summarise the following in clear bullet points: "),
-            ("✦", "Be creative", "Brainstorm ideas and more.", "Brainstorm original ideas for: "),
-        )
         for index, (icon, title_text, detail, prompt) in enumerate(entries):
             card = ActionCard(icon, title_text, detail, prompt)
             card.clicked.connect(lambda checked=False, text=prompt: self.prompt_chosen.emit(text))
@@ -609,9 +686,10 @@ class WelcomeView(QWidget):
 
 
 class MessageWidget(QWidget):
-    def __init__(self, message, is_user, parent=None):
+    def __init__(self, message, is_user, luna=False, parent=None):
         super().__init__(parent)
         self.is_user = is_user
+        self.luna = luna
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         root = QHBoxLayout(self)
@@ -633,15 +711,27 @@ class MessageWidget(QWidget):
         self.bubble.document().setDocumentMargin(8)
 
         if is_user:
-            self.bubble.setStyleSheet(
-                "QTextEdit { background: #3D2A1A; color: #E8B97A; border-radius: 12px; "
-                "padding: 12px 16px; border: 1px solid #6B4428; font-size: 15px; }"
-            )
+            if luna:
+                self.bubble.setStyleSheet(
+                    "QTextEdit { background: #0D1A3A; color: #E8F0FF; border-radius: 12px; "
+                    "padding: 12px 16px; border: 1px solid #2A4090; font-size: 15px; }"
+                )
+            else:
+                self.bubble.setStyleSheet(
+                    "QTextEdit { background: #3D2A1A; color: #E8B97A; border-radius: 12px; "
+                    "padding: 12px 16px; border: 1px solid #6B4428; font-size: 15px; }"
+                )
         else:
-            self.bubble.setStyleSheet(
-                "QTextEdit { background: #2C2018; color: #D4A068; border-radius: 12px; "
-                "padding: 12px 16px; border: 1px solid #4A3020; font-size: 15px; }"
-            )
+            if luna:
+                self.bubble.setStyleSheet(
+                    "QTextEdit { background: #071030; color: #FFFFFF; border-radius: 12px; "
+                    "padding: 12px 16px; border: 1px solid #1A2E70; font-size: 15px; }"
+                )
+            else:
+                self.bubble.setStyleSheet(
+                    "QTextEdit { background: #2C2018; color: #D4A068; border-radius: 12px; "
+                    "padding: 12px 16px; border: 1px solid #4A3020; font-size: 15px; }"
+                )
 
         self.set_message_text(message)
         self._adjust_height()
@@ -668,7 +758,10 @@ class MessageWidget(QWidget):
             text,
             extensions=["fenced_code", "tables", "nl2br", "sane_lists"],
         )
-        text_color = "#E8B97A" if self.is_user else "#D4A068"
+        if self.luna:
+            text_color = "#E8F0FF" if self.is_user else "#FFFFFF"
+        else:
+            text_color = "#E8B97A" if self.is_user else "#D4A068"
         html = f"""
         <html><body style="
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -717,6 +810,33 @@ class ModelPanel(QFrame):
         self.setFixedWidth(350)
         self._build()
 
+    def update_branding(self, luna=False):
+        """Swap model panel icon and text between Sierra and Luna."""
+        from PyQt5.QtGui import QPixmap
+        icon_path = LUNA_ICON_PATH if luna and LUNA_ICON_PATH.exists() else ICON_PATH
+        pixmap = QPixmap(str(icon_path))
+        size = self.panel_icon._size
+        if not pixmap.isNull():
+            self.panel_icon.setPixmap(pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.panel_icon._luna = luna
+        self.panel_icon.update()
+        if luna:
+            self.panel_model_name.setText("Qwen 2.5 Coder 14B")
+            self.panel_description.setText(
+                "Alibaba's Qwen 2.5 Coder 14B, a state-of-the-art coding model running locally."
+            )
+            self.stat_labels["Model Size"].setText("14B parameters")
+            self.stat_labels["Context Window"].setText("128K tokens")
+            self.stat_labels["Quantization"].setText("Q4_K_M (fast)")
+        else:
+            self.panel_model_name.setText("Llama 3 8B")
+            self.panel_description.setText(
+                "Meta's Llama 3 8B model, running on your device for privacy and speed."
+            )
+            self.stat_labels["Model Size"].setText("8B parameters")
+            self.stat_labels["Context Window"].setText("8,192 tokens")
+            self.stat_labels["Quantization"].setText("Q4_K_M (fast)")
+
     def _build(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 32, 20, 28)
@@ -742,28 +862,30 @@ class ModelPanel(QFrame):
         card_layout.setContentsMargins(13, 13, 13, 12)
         card_layout.setSpacing(11)
         model_top = QHBoxLayout()
-        model_top.addWidget(SierraMark(62))
+        self.panel_icon = SierraMark(62)
+        model_top.addWidget(self.panel_icon)
         model_names = QVBoxLayout()
         model_names.setSpacing(2)
-        name = QLabel("Llama 3 8B")
-        name.setObjectName("modelName")
+        self.panel_model_name = QLabel("Llama 3 8B")
+        self.panel_model_name.setObjectName("modelName")
         status = QLabel("●  Running Locally")
         status.setObjectName("runningStatus")
-        model_names.addWidget(name)
+        model_names.addWidget(self.panel_model_name)
         model_names.addWidget(status)
         model_top.addLayout(model_names)
         model_top.addStretch()
         card_layout.addLayout(model_top)
-        description = QLabel(
+        self.panel_description = QLabel(
             "Meta's Llama 3 8B model, running on your device for privacy and speed."
         )
-        description.setObjectName("modelDescription")
-        description.setWordWrap(True)
-        card_layout.addWidget(description)
+        self.panel_description.setObjectName("modelDescription")
+        self.panel_description.setWordWrap(True)
+        card_layout.addWidget(self.panel_description)
         divider = QFrame()
         divider.setObjectName("panelDivider")
         divider.setFrameShape(QFrame.HLine)
         card_layout.addWidget(divider)
+        self.stat_labels = {}
         for key, value in (
             ("Model Size", "8B parameters"),
             ("Context Window", "8,192 tokens"),
@@ -774,15 +896,11 @@ class ModelPanel(QFrame):
             key_label.setObjectName("statKey")
             value_label = QLabel(value)
             value_label.setObjectName("statValue")
+            self.stat_labels[key] = value_label
             row.addWidget(key_label)
             row.addStretch()
             row.addWidget(value_label)
             card_layout.addLayout(row)
-        change = QPushButton("Change Model                                      ›")
-        change.setObjectName("changeModelButton")
-        change.setToolTip("Model selection can be added when more Ollama models are installed.")
-        card_layout.addSpacing(2)
-        card_layout.addWidget(change)
         layout.addWidget(model_card)
         layout.addSpacing(21)
 
@@ -888,10 +1006,170 @@ class ModelPanel(QFrame):
         layout.addWidget(dark_card)
 
 
+class WhatsNewDialog(QDialog):
+    """Popup shown on first launch of a new version."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("What's New")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setFixedSize(580, 560)
+        self.setStyleSheet("""
+            QDialog {
+                background: #0D0C0B;
+                border: 1px solid #6B4428;
+                border-radius: 16px;
+            }
+            QLabel#wn_title {
+                color: #F2EAE1;
+                font-size: 22px;
+                font-weight: 700;
+            }
+            QLabel#wn_version {
+                color: #D08C5C;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QLabel#wn_section {
+                color: #E8B97A;
+                font-size: 14px;
+                font-weight: 700;
+                margin-top: 10px;
+            }
+            QLabel#wn_item {
+                color: #D4C4B0;
+                font-size: 13px;
+                line-height: 1.6;
+            }
+            QPushButton#wn_close {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #F09040,stop:1 #7A3010);
+                color: #FFF8F1;
+                border: none;
+                border-radius: 10px;
+                font-size: 14px;
+                font-weight: 600;
+                min-height: 42px;
+                min-width: 140px;
+            }
+            QPushButton#wn_close:hover {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #FFB060,stop:1 #993820);
+            }
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical { background: transparent; width: 6px; }
+            QScrollBar::handle:vertical { background: #534239; border-radius: 3px; min-height: 24px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        """)
+        self._build()
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(32, 28, 32, 24)
+        root.setSpacing(0)
+
+        # Header
+        header = QHBoxLayout()
+        icon = SierraMark(44)
+        header.addWidget(icon)
+        header.addSpacing(14)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        title = QLabel("What's New in Vanta AI")
+        title.setObjectName("wn_title")
+        version = QLabel(f"Version {APP_VERSION} — Beta Release")
+        version.setObjectName("wn_version")
+        title_col.addWidget(title)
+        title_col.addWidget(version)
+        header.addLayout(title_col)
+        header.addStretch()
+        root.addLayout(header)
+        root.addSpacing(20)
+
+        # Divider
+        div = QFrame()
+        div.setFrameShape(QFrame.HLine)
+        div.setStyleSheet("background: #3A2518; max-height: 1px;")
+        root.addWidget(div)
+        root.addSpacing(16)
+
+        # Scrollable content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 10, 0)
+        content_layout.setSpacing(4)
+
+        changelog = self._load_changelog()
+        for line in changelog:
+            if line.startswith("## "):
+                pass  # skip top-level version header already shown
+            elif line.startswith("### "):
+                lbl = QLabel(line[4:])
+                lbl.setObjectName("wn_section")
+                lbl.setWordWrap(True)
+                content_layout.addSpacing(8)
+                content_layout.addWidget(lbl)
+            elif line.startswith("- "):
+                text = line[2:].replace("**", "")
+                lbl = QLabel(f"  •  {text}")
+                lbl.setObjectName("wn_item")
+                lbl.setWordWrap(True)
+                content_layout.addWidget(lbl)
+
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
+        root.addSpacing(20)
+
+        # Close button
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("Let's go  ›")
+        close_btn.setObjectName("wn_close")
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        root.addLayout(btn_row)
+
+    def _load_changelog(self):
+        """Read CHANGELOG.md and return lines for the latest version block."""
+        cl_path = Path(__file__).resolve().parent / "CHANGELOG.md"
+        if not cl_path.exists():
+            return []
+        lines = cl_path.read_text(encoding="utf-8").splitlines()
+        # Return lines up to (but not including) the next ## version block
+        result = []
+        in_block = False
+        for line in lines:
+            if line.startswith("## "):
+                if in_block:
+                    break  # stop at next version
+                in_block = True
+                continue  # skip the version header itself
+            if in_block:
+                result.append(line)
+        return result
+
+
 class LocalAIApp(QMainWindow):
     SYSTEM_PROMPT = (
         "You are Sierra, a friendly, capable local AI assistant. Be concise, clear, "
         "and conversational. Use Markdown only when it improves readability."
+    )
+    LUNA_SYSTEM_PROMPT = (
+        "You are Luna, an expert coding AI assistant. You specialise in writing clean, "
+        "efficient, production-ready code across all languages and frameworks. "
+        "Follow these rules strictly:\n"
+        "1. Always wrap code in fenced code blocks with the correct language tag.\n"
+        "2. Explain your code clearly but concisely — no fluff.\n"
+        "3. When debugging, identify the root cause before suggesting a fix.\n"
+        "4. Prefer idiomatic patterns and best practices for each language.\n"
+        "5. If a question is ambiguous, state your assumptions.\n"
+        "6. For large problems, break your answer into numbered steps.\n"
+        "Be direct and technical. The user is a developer."
     )
 
     def __init__(self):
@@ -904,6 +1182,9 @@ class LocalAIApp(QMainWindow):
         self.resize(1536, 972)
         self.conversation_history = []
         self.use_search = False
+        self.use_luna = False
+        self._transition_progress = 0.0   # 0.0 = fully Sierra, 1.0 = fully Luna
+        self._transition_target = 0.0
         self.chat_thread = None
         self.thinking_widget = None
         self._attached_file = None
@@ -911,85 +1192,195 @@ class LocalAIApp(QMainWindow):
         self._build()
         self._load_latest_chat()
         self.start_new_chat()
+        # Show What's New on first launch of this version
+        QTimer.singleShot(400, self._maybe_show_whats_new)
+
+    def _get_transition_progress(self):
+        return self._transition_progress
+
+    def _set_transition_progress(self, value):
+        self._transition_progress = value
+        self.update()
+
+    transition_progress = pyqtProperty(float, _get_transition_progress, _set_transition_progress)
 
     def paintEvent(self, event):
         from PyQt5.QtGui import QPainter, QLinearGradient, QColor
+        import random
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        grad = QLinearGradient(0, 0, self.width(), self.height())
-        grad.setColorAt(0.0,  QColor("#0A0906"))   # near-black
-        grad.setColorAt(0.45, QColor("#1A1008"))   # very dark amber-brown
-        grad.setColorAt(0.75, QColor("#3A1E0A"))   # deep desert
-        grad.setColorAt(1.0,  QColor("#6B3510"))   # warm desert amber
+        w, h = self.width(), self.height()
+        t = self._transition_progress  # 0.0 = Sierra, 1.0 = Luna
+
+        def lerp_color(c1, c2, t):
+            r = int(c1.red()   + (c2.red()   - c1.red())   * t)
+            g = int(c1.green() + (c2.green() - c1.green()) * t)
+            b = int(c1.blue()  + (c2.blue()  - c1.blue())  * t)
+            return QColor(r, g, b)
+
+        # Sierra stops
+        s0 = QColor("#0A0906")
+        s1 = QColor("#1A1008")
+        s2 = QColor("#3A1E0A")
+        s3 = QColor("#6B3510")
+        # Luna stops
+        l0 = QColor("#000510")
+        l1 = QColor("#030D2A")
+        l2 = QColor("#071440")
+        l3 = QColor("#0A1A55")
+
+        grad = QLinearGradient(0, 0, w, h)
+        grad.setColorAt(0.0,  lerp_color(s0, l0, t))
+        grad.setColorAt(0.4,  lerp_color(s1, l1, t))
+        grad.setColorAt(0.75, lerp_color(s2, l2, t))
+        grad.setColorAt(1.0,  lerp_color(s3, l3, t))
         painter.fillRect(self.rect(), grad)
+
+        # Draw stars fading in as Luna takes over
+        if t > 0.0:
+            rng = random.Random(42)
+            alpha = int(180 * t)
+            painter.setPen(QColor(255, 255, 255, alpha))
+            for _ in range(120):
+                x = rng.randint(0, w)
+                y = rng.randint(0, h)
+                size = rng.choice([1, 1, 1, 2, 2, 3])
+                painter.drawEllipse(x, y, size, size)
+            painter.setPen(QColor(200, 220, 255, int(230 * t)))
+            for _ in range(20):
+                x = rng.randint(0, w)
+                y = rng.randint(0, h)
+                painter.drawText(x, y, "·")
+
         painter.end()
 
-    @staticmethod
-    def _stylesheet():
-        return """
-            * { font-family: 'Segoe UI', Arial, sans-serif; }
-            QMainWindow { background: transparent; }
-            QFrame#appShell { background: rgba(10, 8, 6, 0.82); border: 1px solid rgba(180, 100, 40, 0.35); border-radius: 12px; }
-            QFrame#titleBar { background: #151311; border-bottom: 1px solid #352C26; min-height: 58px; max-height: 58px; border-top-right-radius: 12px; }
-            QFrame#windowControls { background: transparent; border: none; }
-            QPushButton#trafficClose, QPushButton#trafficMinimize, QPushButton#trafficMaximize { border: none; border-radius: 0; color: #C0C0C0; font-size: 14px; font-weight: bold; }
-            QPushButton#trafficClose { background: transparent; } QPushButton#trafficMinimize { background: transparent; } QPushButton#trafficMaximize { background: transparent; }
-            QPushButton#trafficClose:hover { background: #E81123; color: white; } QPushButton#trafficMinimize:hover { background: #4C4C4C; color: white; } QPushButton#trafficMaximize:hover { background: #4C4C4C; color: white; }
-            QLabel#titleIcon { color: #D59A6E; font-size: 21px; }
-            QLabel#titleText { color: #F1E9E0; font-size: 16px; font-weight: 600; }
-            QPushButton#topIconButton { color: #C9A68B; background: transparent; border: none; font-size: 20px; min-width: 30px; }
-            QPushButton#topIconButton:hover { color: #F3D1B3; }
-            QFrame#sidebar { background: #15120F; border: none; border-right: 1px solid #352C26; border-bottom-left-radius: 12px; }
-            QLabel#wordmark { color: #F1E9E0; font-size: 23px; font-weight: 700; }
-            QLabel#wordmark span, QLabel#heroTitle span { color: #D08C5C; }
-            QLabel#brandDescription { color: #BDA792; font-size: 13px; }
-            QPushButton#navButton, QPushButton#navButtonActive { color: #C4B7A9; background: transparent; border: none; border-radius: 12px; padding: 0 14px; text-align: left; font-size: 15px; }
-            QPushButton#navButton:hover { background: #2A211B; color: #F1E4D8; }
-            QPushButton#navButton:checked { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4A2E1A, stop:1 #3E2010); color: #FFF9F3; }
-            QPushButton#navButtonActive { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6B4020, stop:1 #4A2810); color: #FFF9F3; font-weight: 600; }
-            QPushButton#navButtonActive:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7D4D28, stop:1 #5A3418); }
-            QFrame#sidebarDivider, QFrame#panelDivider { color: #3A302A; background: #3A302A; max-height: 1px; }
-            QLabel#sectionHeading { color: #D3BDA9; font-size: 14px; font-weight: 500; padding: 0 0 7px 8px; }
-            QFrame#recentChat { background: transparent; border-radius: 8px; }
-            QFrame#recentChat:hover { background: #282019; }
-            QLabel#recentIcon { color: #E0B187; background: #2A211B; border-radius: 8px; font-size: 15px; }
-            QLabel#recentName { color: #D0C0B1; font-size: 14px; font-weight: 500; } QLabel#recentAge { color: #9D8877; font-size: 12px; }
-            QFrame#sidebarModelCard { background: #211914; border: 1px solid #503827; border-radius: 12px; }
-            QLabel#sidebarModelTitle { color: #F1E9E0; font-size: 14px; font-weight: 600; }
-            QLabel#sidebarModelSubtitle { color: #C1A78F; font-size: 11px; } QLabel#onlineIndicator { color: #55D8A7; font-size: 11px; }
-            QLabel#cardChevron { color: #D9AC85; font-size: 28px; font-weight: 200; }
-            QScrollArea { background: transparent; border: none; } QScrollBar:vertical { background: transparent; width: 8px; margin: 8px 1px; }
-            QScrollBar::handle:vertical { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #C8773A, stop:1 #7A3E1A); border-radius: 4px; min-height: 38px; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QWidget#centralPane { background: #0D0C0B; }
-            QLabel#heroTitle { color: #F2EAE1; font-size: 51px; font-weight: 700; }
-            QLabel#heroSubtitle { color: #D2B9A3; font-size: 20px; } QLabel#heroDescription { color: #AA9788; font-size: 15px; }
-            QPushButton#actionCard { background: #191512; border: 1px solid #342A23; border-radius: 12px; text-align: left; }
-            QPushButton#actionCard:hover { background: #251B16; border-color: #754C34; }
-            QLabel#actionIcon { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3A2418, stop:1 #251710); color: #E2B189; border-radius: 12px; font-size: 17px; font-weight: 700; }
-            QLabel#actionTitle { color: #F0E6DD; font-size: 14px; font-weight: 600; } QLabel#actionSubtitle { color: #B7A18E; font-size: 12px; }
-            QFrame#composer { background: transparent; border: none; border-radius: 12px; }
-            QTextEdit#chatInput { color: #F0E8E0; background: transparent; border: none; padding: 12px 18px; font-size: 15px; selection-background-color: #885334; }
-            QTextEdit#chatInput:focus { border: none; }
-            QPushButton#composerButton { color: #D0B89F; background: #2A211B; border: none; border-radius: 12px; padding: 0 13px; min-height: 39px; font-size: 13px; }
-            QPushButton#composerButton:hover, QPushButton#composerButton:checked { color: #FFF7F0; background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7A4828, stop:1 #4E2C14); }
-            QPushButton#attachButton { color: #D0B89F; background: #2A211B; border: none; border-radius: 12px; min-height: 39px; min-width: 40px; max-width: 40px; font-size: 23px; }
-            QPushButton#attachButton:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7A4828, stop:1 #4E2C14); color: #FFF7F0; }
-            QPushButton#sendButton { color: #FFF8F1; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F09040, stop:1 #7A3010); border: none; border-radius: 12px; min-width: 40px; max-width: 40px; min-height: 40px; font-size: 21px; font-weight: 600; }
-            QPushButton#sendButton:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #FFB060, stop:1 #993820); } QPushButton#sendButton:disabled { background: #493127; color: #A58A78; }
-            QFrame#modelPanel { background: #12100E; border: none; border-left: 1px solid #352C26; border-bottom-right-radius: 12px; }
-            QLabel#panelHeadingIcon, QLabel#featureSparkle { color: #D7A178; font-size: 20px; } QLabel#panelHeading { color: #E9DDD2; font-size: 17px; font-weight: 600; }
-            QLabel#tuningIcon { color: #D7A178; font-size: 20px; } QFrame#modelCard, QFrame#darkModeCard { background: #1A1512; border: 1px solid #3C3028; border-radius: 12px; }
-            QLabel#modelName { color: #F0E8E0; font-size: 16px; font-weight: 600; } QLabel#runningStatus { color: #50D5A3; font-size: 12px; }
-            QLabel#modelDescription { color: #C6B09A; font-size: 13px; line-height: 1.5; } QLabel#statKey { color: #C9B5A1; font-size: 13px; } QLabel#statValue { color: #E0C5AC; font-size: 13px; }
-            QPushButton#changeModelButton { color: #DEC3AA; background: #231A15; border: 1px solid #493528; border-radius: 12px; min-height: 40px; padding: 0 12px; text-align: left; font-size: 13px; }
-            QPushButton#changeModelButton:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4A2E18, stop:1 #2E1C0E); color: #FFF7F0; }
-            QLabel#featureIcon { color: #D9AA81; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #35231A, stop:1 #1E130C); border-radius: 12px; font-size: 18px; } QLabel#featureTitle { color: #E2D2C2; font-size: 13px; font-weight: 500; } QLabel#featureDetail { color: #A9927F; font-size: 11px; }
-            QCheckBox#darkToggle::indicator { width: 39px; height: 24px; border-radius: 12px; background: #4C3A2F; } QCheckBox#darkToggle::indicator:checked { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #E08844, stop:1 #8C4418); } QCheckBox#darkToggle::indicator:checked:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #F09A55, stop:1 #A05025); }
-            QLabel#assistantAvatar { color: #FFF4E9; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #A86030, stop:1 #5A2E10); border-radius: 12px; font-size: 9px; font-weight: 800; } QLabel#userAvatar { color: #EAD7C3; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3E2D22, stop:1 #241610); border: 1px solid #60432F; border-radius: 12px; font-size: 8px; font-weight: 800; }
-            QLabel#messageMeta { color: #AA9280; font-size: 10px; } QTextEdit#assistantMessage { color: #E9DED3; background: #2A2A2A; border-radius: 12px; padding: 12px 16px; font-size: 15px; } QTextEdit#userMessage { color: #F0EDE8; background: #3A3A3A; border-radius: 12px; padding: 12px 16px; font-size: 15px; }
-            QTextEdit { border: none; }
-            QFrame#thinkingWidget { background: transparent; border: none; } QLabel#thinkingText { color: #D7C1AB; font-size: 13px; font-weight: 600; }
-            QLabel#iconFallback { color: #E8C09B; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4A2E1C, stop:1 #271610); border-radius: 12px; font-size: 18px; font-weight: 700; }
+    def _stylesheet(self):
+        if self.use_luna:
+            shell_bg   = "rgba(5, 10, 30, 0.88)"
+            shell_border = "rgba(80, 120, 220, 0.4)"
+            sidebar_bg = "#05091E"
+            sidebar_border = "#0F1A40"
+            title_bg   = "#060A20"
+            title_border = "#0F1A40"
+            panel_bg   = "#050818"
+            central_bg = "#040710"
+            composer_border_color = "#1E3080"
+            accent     = "#7090E0"
+            accent2    = "#A0B8F0"
+            wordmark_version = "#4A7AD8"
+            nav_checked = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0E2060,stop:1 #081440)"
+            nav_active  = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #142880,stop:1 #0A1A50)"
+            send_bg     = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3060D0,stop:1 #0A1A60)"
+            send_hover  = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4878E8,stop:1 #1428A0)"
+            scroll_handle = "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #2850C0,stop:1 #0A1850)"
+            model_card_bg = "#08102A"
+            model_card_border = "#1A2860"
+            avatar_ai   = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #204090,stop:1 #0A1850)"
+            avatar_user = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #152060,stop:1 #080E30)"
+            avatar_user_border = "#203080"
+            toggle_checked = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #2860E0,stop:1 #0A3090)"
+            action_card_bg = "#080E28"
+            action_card_border = "#1A2858"
+            action_icon_bg = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #0E1A40,stop:1 #060E28)"
+            composer_bg = "#060A20"
+            input_selection = "#1A3088"
+            luna_btn = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3A2860,stop:1 #251840)"
+        else:
+            shell_bg   = "rgba(10, 8, 6, 0.82)"
+            shell_border = "rgba(180, 100, 40, 0.35)"
+            sidebar_bg = "#15120F"
+            sidebar_border = "#352C26"
+            title_bg   = "#151311"
+            title_border = "#352C26"
+            panel_bg   = "#12100E"
+            central_bg = "#0D0C0B"
+            composer_border_color = "#714A34"
+            accent     = "#D59A6E"
+            accent2    = "#C9A68B"
+            wordmark_version = "#D08C5C"
+            nav_checked = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4A2E1A,stop:1 #3E2010)"
+            nav_active  = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6B4020,stop:1 #4A2810)"
+            send_bg     = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #F09040,stop:1 #7A3010)"
+            send_hover  = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #FFB060,stop:1 #993820)"
+            scroll_handle = "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #C8773A,stop:1 #7A3E1A)"
+            model_card_bg = "#1A1512"
+            model_card_border = "#3C3028"
+            avatar_ai   = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #A86030,stop:1 #5A2E10)"
+            avatar_user = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3E2D22,stop:1 #241610)"
+            avatar_user_border = "#60432F"
+            toggle_checked = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #E08844,stop:1 #8C4418)"
+            action_card_bg = "#191512"
+            action_card_border = "#342A23"
+            action_icon_bg = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3A2418,stop:1 #251710)"
+            composer_bg = "#18130F"
+            input_selection = "#885334"
+            luna_btn = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3A2860,stop:1 #251840)"
+
+        return f"""
+            * {{ font-family: 'Segoe UI', Arial, sans-serif; }}
+            QMainWindow {{ background: transparent; }}
+            QFrame#appShell {{ background: {shell_bg}; border: 1px solid {shell_border}; border-radius: 12px; }}
+            QFrame#titleBar {{ background: {title_bg}; border-bottom: 1px solid {title_border}; min-height: 58px; max-height: 58px; border-top-right-radius: 12px; }}
+            QFrame#windowControls {{ background: transparent; border: none; }}
+            QPushButton#trafficClose, QPushButton#trafficMinimize, QPushButton#trafficMaximize {{ border: none; border-radius: 0; color: #C0C0C0; font-size: 14px; font-weight: bold; }}
+            QPushButton#trafficClose {{ background: transparent; }} QPushButton#trafficMinimize {{ background: transparent; }} QPushButton#trafficMaximize {{ background: transparent; }}
+            QPushButton#trafficClose:hover {{ background: #E81123; color: white; }} QPushButton#trafficMinimize:hover {{ background: #4C4C4C; color: white; }} QPushButton#trafficMaximize:hover {{ background: #4C4C4C; color: white; }}
+            QLabel#titleIcon {{ color: {accent}; font-size: 21px; }}
+            QLabel#titleText {{ color: #F1E9E0; font-size: 16px; font-weight: 600; }}
+            QPushButton#topIconButton {{ color: {accent2}; background: transparent; border: none; font-size: 20px; min-width: 30px; }}
+            QPushButton#topIconButton:hover {{ color: #F3D1B3; }}
+            QFrame#sidebar {{ background: {sidebar_bg}; border: none; border-right: 1px solid {sidebar_border}; border-bottom-left-radius: 12px; }}
+            QLabel#wordmark {{ color: #F1E9E0; font-size: 23px; font-weight: 700; }}
+            QLabel#wordmark span, QLabel#heroTitle span {{ color: {wordmark_version}; }}
+            QLabel#brandDescription {{ color: #BDA792; font-size: 13px; }}
+            QPushButton#navButton, QPushButton#navButtonActive {{ color: #C4B7A9; background: transparent; border: none; border-radius: 12px; padding: 0 14px; text-align: left; font-size: 15px; }}
+            QPushButton#navButton:hover {{ background: #2A211B; color: #F1E4D8; }}
+            QPushButton#navButton:checked {{ background: {nav_checked}; color: #FFF9F3; }}
+            QPushButton#navButtonActive {{ background: {nav_active}; color: #FFF9F3; font-weight: 600; }}
+            QPushButton#navButtonActive:hover {{ background: {nav_active}; }}
+            QPushButton#lunaButton {{ color: #A89BC2; background: transparent; border: none; border-radius: 12px; padding: 0 14px; text-align: left; font-size: 15px; min-height: 48px; }}
+            QPushButton#lunaButton:hover {{ background: #1E1A2A; color: #C8B8E8; }}
+            QPushButton#lunaButton:checked {{ background: {luna_btn}; color: #D4C0F0; font-weight: 600; }}
+            QFrame#sidebarDivider, QFrame#panelDivider {{ color: #3A302A; background: #3A302A; max-height: 1px; }}
+            QLabel#sectionHeading {{ color: #D3BDA9; font-size: 14px; font-weight: 500; padding: 0 0 7px 8px; }}
+            QFrame#recentChat {{ background: transparent; border-radius: 8px; }}
+            QFrame#recentChat:hover {{ background: #282019; }}
+            QLabel#recentIcon {{ color: #E0B187; background: #2A211B; border-radius: 8px; font-size: 15px; }}
+            QLabel#recentName {{ color: #D0C0B1; font-size: 14px; font-weight: 500; }} QLabel#recentAge {{ color: #9D8877; font-size: 12px; }}
+            QFrame#sidebarModelCard {{ background: #211914; border: 1px solid #503827; border-radius: 12px; }}
+            QLabel#sidebarModelTitle {{ color: #F1E9E0; font-size: 14px; font-weight: 600; }}
+            QLabel#sidebarModelSubtitle {{ color: #C1A78F; font-size: 11px; }} QLabel#onlineIndicator {{ color: #55D8A7; font-size: 11px; }}
+            QLabel#cardChevron {{ color: #D9AC85; font-size: 28px; font-weight: 200; }}
+            QScrollArea {{ background: transparent; border: none; }} QScrollBar:vertical {{ background: transparent; width: 8px; margin: 8px 1px; }}
+            QScrollBar::handle:vertical {{ background: {scroll_handle}; border-radius: 4px; min-height: 38px; }} QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QWidget#centralPane {{ background: {central_bg}; }}
+            QLabel#heroTitle {{ color: #F2EAE1; font-size: 51px; font-weight: 700; }}
+            QLabel#heroSubtitle {{ color: #D2B9A3; font-size: 20px; }} QLabel#heroDescription {{ color: #AA9788; font-size: 15px; }}
+            QPushButton#actionCard {{ background: {action_card_bg}; border: 1px solid {action_card_border}; border-radius: 12px; text-align: left; }}
+            QPushButton#actionCard:hover {{ background: #251B16; border-color: #754C34; }}
+            QLabel#actionIcon {{ background: {action_icon_bg}; color: #E2B189; border-radius: 12px; font-size: 17px; font-weight: 700; }}
+            QLabel#actionTitle {{ color: #F0E6DD; font-size: 14px; font-weight: 600; }} QLabel#actionSubtitle {{ color: #B7A18E; font-size: 12px; }}
+            QFrame#composer {{ background: transparent; border: none; border-radius: 12px; }}
+            QTextEdit#chatInput {{ color: #F0E8E0; background: transparent; border: none; padding: 12px 18px; font-size: 15px; selection-background-color: {input_selection}; }}
+            QTextEdit#chatInput:focus {{ border: none; }}
+            QPushButton#composerButton {{ color: #D0B89F; background: #2A211B; border: none; border-radius: 12px; padding: 0 13px; min-height: 39px; font-size: 13px; }}
+            QPushButton#composerButton:hover, QPushButton#composerButton:checked {{ color: #FFF7F0; background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #7A4828,stop:1 #4E2C14); }}
+            QPushButton#attachButton {{ color: #D0B89F; background: #2A211B; border: none; border-radius: 12px; min-height: 39px; min-width: 40px; max-width: 40px; font-size: 23px; }}
+            QPushButton#attachButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #7A4828,stop:1 #4E2C14); color: #FFF7F0; }}
+            QPushButton#sendButton {{ color: #FFF8F1; background: {send_bg}; border: none; border-radius: 12px; min-width: 40px; max-width: 40px; min-height: 40px; font-size: 21px; font-weight: 600; }}
+            QPushButton#sendButton:hover {{ background: {send_hover}; }} QPushButton#sendButton:disabled {{ background: #493127; color: #A58A78; }}
+            QFrame#modelPanel {{ background: {panel_bg}; border: none; border-left: 1px solid {sidebar_border}; border-bottom-right-radius: 12px; }}
+            QLabel#panelHeadingIcon, QLabel#featureSparkle {{ color: {accent}; font-size: 20px; }} QLabel#panelHeading {{ color: #E9DDD2; font-size: 17px; font-weight: 600; }}
+            QLabel#tuningIcon {{ color: {accent}; font-size: 20px; }} QFrame#modelCard, QFrame#darkModeCard {{ background: {model_card_bg}; border: 1px solid {model_card_border}; border-radius: 12px; }}
+            QLabel#modelName {{ color: #F0E8E0; font-size: 16px; font-weight: 600; }} QLabel#runningStatus {{ color: #50D5A3; font-size: 12px; }}
+            QLabel#modelDescription {{ color: #C6B09A; font-size: 13px; line-height: 1.5; }} QLabel#statKey {{ color: #C9B5A1; font-size: 13px; }} QLabel#statValue {{ color: #E0C5AC; font-size: 13px; }}
+            QLabel#featureIcon {{ color: {accent}; background: {action_icon_bg}; border-radius: 12px; font-size: 18px; }} QLabel#featureTitle {{ color: #E2D2C2; font-size: 13px; font-weight: 500; }} QLabel#featureDetail {{ color: #A9927F; font-size: 11px; }}
+            QCheckBox#darkToggle::indicator {{ width: 39px; height: 24px; border-radius: 12px; background: #4C3A2F; }} QCheckBox#darkToggle::indicator:checked {{ background: {toggle_checked}; }} QCheckBox#darkToggle::indicator:checked:hover {{ background: {send_hover}; }}
+            QLabel#assistantAvatar {{ color: #FFF4E9; background: {avatar_ai}; border-radius: 12px; font-size: 9px; font-weight: 800; }} QLabel#userAvatar {{ color: #EAD7C3; background: {avatar_user}; border: 1px solid {avatar_user_border}; border-radius: 12px; font-size: 8px; font-weight: 800; }}
+            QLabel#messageMeta {{ color: #AA9280; font-size: 10px; }}
+            QTextEdit {{ border: none; }}
+            QFrame#thinkingWidget {{ background: transparent; border: none; }} QLabel#thinkingText {{ color: #D7C1AB; font-size: 13px; font-weight: 600; }}
+            QLabel#iconFallback {{ color: #E8C09B; background: {action_icon_bg}; border-radius: 12px; font-size: 18px; font-weight: 700; }}
         """
 
     def _build(self):
@@ -1011,6 +1402,7 @@ class LocalAIApp(QMainWindow):
         self.sidebar = Sidebar()
         self.sidebar.new_chat_requested.connect(self.start_new_chat)
         self.sidebar.search_toggled.connect(self.set_search)
+        self.sidebar.luna_toggled.connect(self.set_luna)
         self.sidebar.chat_loaded.connect(self.load_chat)
         sidebar_column.addWidget(self.sidebar, 1)
         shell_layout.addLayout(sidebar_column)
@@ -1104,6 +1496,39 @@ class LocalAIApp(QMainWindow):
         attach.setToolTip("Attach a file")
         attach.clicked.connect(self._attach_file)
         actions.addWidget(attach)
+
+        # Model switcher
+        from PyQt5.QtWidgets import QMenu, QWidgetAction
+        self.model_button = QPushButton("⬡  Sierra")
+        self.model_button.setObjectName("composerButton")
+        self.model_button.setToolTip("Switch AI model")
+        self.model_button.setCursor(Qt.PointingHandCursor)
+        model_menu = QMenu(self.model_button)
+
+        # Sierra item
+        sierra_action = model_menu.addAction("⬡  Sierra  (Llama 3 8B)")
+        sierra_action.triggered.connect(lambda: self._switch_model("sierra"))
+
+        # Luna item — dark blue with stars as a custom widget
+        luna_widget = QLabel("✦ · Luna  (Qwen 2.5 Coder 14B) · ✦")
+        luna_widget.setStyleSheet(
+            "QLabel { background: #080E2E; color: #C8D8FF; font-size: 13px; "
+            "padding: 8px 18px; border-radius: 6px; border: 1px solid #1E3080; }"
+        )
+        luna_widget.setCursor(Qt.PointingHandCursor)
+        luna_wa = QWidgetAction(model_menu)
+        luna_wa.setDefaultWidget(luna_widget)
+        luna_widget.mousePressEvent = lambda e: self._luna_menu_click(model_menu)
+        model_menu.addAction(luna_wa)
+
+        model_menu.setStyleSheet("""
+            QMenu { background: #1A1410; border: 1px solid #6B4428; border-radius: 8px; padding: 4px; font-size: 13px; }
+            QMenu::item { padding: 8px 18px; border-radius: 6px; color: #E8B97A; }
+            QMenu::item:selected { background: #4A2E18; color: #FFD580; }
+        """)
+        self.model_button.setMenu(model_menu)
+        actions.addWidget(self.model_button)
+
         self.search_button = QPushButton("◎  Search")
         self.search_button.setObjectName("composerButton")
         self.search_button.setCheckable(True)
@@ -1125,7 +1550,7 @@ class LocalAIApp(QMainWindow):
         return holder
 
     def _show_welcome(self):
-        self.welcome = WelcomeView()
+        self.welcome = WelcomeView(luna=self.use_luna)
         self.welcome.prompt_chosen.connect(self.use_prompt)
         self.message_layout.addWidget(self.welcome)
 
@@ -1197,7 +1622,7 @@ class LocalAIApp(QMainWindow):
             item = self.message_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self.conversation_history = [SystemMessage(content=self.SYSTEM_PROMPT)]
+        self.conversation_history = [SystemMessage(content=self.LUNA_SYSTEM_PROMPT if self.use_luna else self.SYSTEM_PROMPT)]
         self.thinking_widget = None
         # Reset session filename so this new chat gets its own file on close
         if hasattr(self, '_session_filename'):
@@ -1258,6 +1683,86 @@ class LocalAIApp(QMainWindow):
             self.sidebar.search.setText("⌕    Search  ON" if enabled else "⌕    Search")
             self.sidebar.search.blockSignals(False)
 
+    def set_luna(self, enabled):
+        self.use_luna = enabled
+        active_prompt = self.LUNA_SYSTEM_PROMPT if enabled else self.SYSTEM_PROMPT
+        if self.conversation_history:
+            self.conversation_history[0] = SystemMessage(content=active_prompt)
+        mode = "🌙 Luna — Coding AI" if enabled else "New Chat"
+        for widget in self.title_bar.findChildren(QLabel):
+            if widget.objectName() == "titleText":
+                widget.setText(mode)
+                break
+        self._switch_model("luna" if enabled else "sierra")
+
+    def _luna_menu_click(self, menu):
+        menu.close()
+        self._switch_model("luna")
+
+    def _switch_model(self, mode):
+        """Switch between Sierra and Luna from the composer model button."""
+        going_luna = (mode == "luna")
+        # Kick off background fade animation
+        anim = QPropertyAnimation(self, b"transition_progress")
+        anim.setDuration(600)
+        anim.setStartValue(self._transition_progress)
+        anim.setEndValue(1.0 if going_luna else 0.0)
+        anim.setEasingCurve(QEasingCurve.InOutCubic)
+        anim.start()
+        self._anim = anim  # keep reference so it isn't garbage collected
+
+        if going_luna:
+            self.use_luna = True
+            self.model_button.setText("🌙  Luna")
+            if self.conversation_history:
+                self.conversation_history[0] = SystemMessage(content=self.LUNA_SYSTEM_PROMPT)
+            self.sidebar.luna_button.blockSignals(True)
+            self.sidebar.luna_button.setChecked(True)
+            self.sidebar.luna_button.setText("🌙    Luna  ON")
+            self.sidebar.luna_button.blockSignals(False)
+            for widget in self.title_bar.findChildren(QLabel):
+                if widget.objectName() == "titleText":
+                    widget.setText("🌙 Luna — Coding AI")
+                    break
+        else:
+            self.use_luna = False
+            self.model_button.setText("⬡  Sierra")
+            if self.conversation_history:
+                self.conversation_history[0] = SystemMessage(content=self.SYSTEM_PROMPT)
+            self.sidebar.luna_button.blockSignals(True)
+            self.sidebar.luna_button.setChecked(False)
+            self.sidebar.luna_button.setText("🌙    Luna  —  Coding AI")
+            self.sidebar.luna_button.blockSignals(False)
+            for widget in self.title_bar.findChildren(QLabel):
+                if widget.objectName() == "titleText":
+                    widget.setText("New Chat")
+                    break
+        self.setStyleSheet(self._stylesheet())
+        self.update()
+        # Repaint composer border
+        if self.centralWidget():
+            self.centralWidget().update()
+        # Update sidebar branding
+        self.sidebar.update_branding(luna=self.use_luna)
+        # Update model panel branding
+        self.model_panel.update_branding(luna=self.use_luna)
+        # Refresh welcome screen if it's currently showing
+        if hasattr(self, 'welcome'):
+            try:
+                self.welcome.setParent(None)
+                self.welcome.deleteLater()
+            except RuntimeError:
+                pass
+            del self.welcome
+            # Clear entire message layout then rebuild welcome
+            while self.message_layout.count():
+                item = self.message_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            self._show_welcome()
+        # Update chat input placeholder
+        self.chat_input.setPlaceholderText("Message Luna…" if self.use_luna else f"Message {APP_NAME}…")
+
     def send_message(self):
         text = self.chat_input.toPlainText().strip()
         if not text and not self._attached_file:
@@ -1302,14 +1807,15 @@ class LocalAIApp(QMainWindow):
         self.send_button.setEnabled(False)
         self._add_thinking()
         temperature = self.model_panel.temp_slider.value() / 100
-        self.chat_thread = ChatThread(self.conversation_history, self.use_search, stream=True, temperature=temperature)
+        active_model = LUNA_MODEL_NAME if self.use_luna else MODEL_NAME
+        self.chat_thread = ChatThread(self.conversation_history, self.use_search, stream=True, temperature=temperature, model=active_model)
         self.chat_thread.response_ready.connect(self.display_response)
         self.chat_thread.stream_chunk.connect(self.stream_response)
         self.chat_thread.error.connect(self.show_error)
         self.chat_thread.start()
 
     def _add_message(self, text, is_user):
-        message = MessageWidget(text, is_user)
+        message = MessageWidget(text, is_user, luna=self.use_luna)
         self.message_layout.addWidget(message)
         QTimer.singleShot(0, self._scroll_to_bottom)
 
@@ -1350,7 +1856,7 @@ class LocalAIApp(QMainWindow):
         if not hasattr(self, 'current_ai_message'):
             self._remove_thinking()
             self.current_ai_message = ""
-            self.current_ai_widget = MessageWidget("", is_user=False)
+            self.current_ai_widget = MessageWidget("", is_user=False, luna=self.use_luna)
             self.message_layout.addWidget(self.current_ai_widget)
             QTimer.singleShot(0, self._scroll_to_bottom)
 
@@ -1499,6 +2005,29 @@ class LocalAIApp(QMainWindow):
         self.chat_input.setFocus()
         self.send_button.setEnabled(True)
         self._scroll_to_bottom()
+
+    def _maybe_show_whats_new(self):
+        """Show the What's New dialog if this version hasn't been seen before."""
+        version_file = Path.home() / ".sierra" / "last_seen_version.txt"
+        try:
+            last_seen = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
+        except Exception:
+            last_seen = ""
+
+        if last_seen != APP_VERSION:
+            dlg = WhatsNewDialog(self)
+            # Centre over the main window
+            dlg.move(
+                self.x() + (self.width()  - dlg.width())  // 2,
+                self.y() + (self.height() - dlg.height()) // 2,
+            )
+            dlg.exec_()
+            # Mark this version as seen
+            try:
+                version_file.parent.mkdir(parents=True, exist_ok=True)
+                version_file.write_text(APP_VERSION, encoding="utf-8")
+            except Exception:
+                pass
 
     def _resize_input(self):
         """Grow the chat input vertically to fit content, up to its maximum height."""
