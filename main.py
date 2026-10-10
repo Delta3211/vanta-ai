@@ -696,10 +696,17 @@ class MessageWidget(QWidget):
         root.setContentsMargins(0, 4, 0, 4)
         root.setSpacing(11)
 
-        avatar = QLabel("YOU" if is_user else "AI")
-        avatar.setObjectName("userAvatar" if is_user else "assistantAvatar")
-        avatar.setFixedSize(32, 32)
-        avatar.setAlignment(Qt.AlignTop | Qt.AlignCenter)
+        self.avatar = QLabel("YOU" if is_user else "AI")
+        self.avatar.setObjectName("userAvatar" if is_user else "assistantAvatar")
+        self.avatar.setFixedSize(32, 32)
+        self.avatar.setAlignment(Qt.AlignTop | Qt.AlignCenter)
+        
+        # Create a vertical container for bubble + code blocks
+        self.content_container = QWidget()
+        self.content_container.setStyleSheet("background: transparent;")
+        self.content_layout = QVBoxLayout(self.content_container)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(8)
 
         self.bubble = QTextEdit()
         self.bubble.setObjectName("userMessage" if is_user else "assistantMessage")
@@ -732,6 +739,9 @@ class MessageWidget(QWidget):
                     "QTextEdit { background: #2C2018; color: #D4A068; border-radius: 12px; "
                     "padding: 12px 16px; border: 1px solid #4A3020; font-size: 15px; }"
                 )
+        
+        # Add bubble to content container
+        self.content_layout.addWidget(self.bubble)
 
         self.set_message_text(message)
         self._adjust_height()
@@ -739,12 +749,12 @@ class MessageWidget(QWidget):
         if is_user:
             # User messages: bubble hugs right, grows left for longer text (max 75% width)
             root.addStretch(1)
-            root.addWidget(self.bubble, 3)
-            root.addWidget(avatar)
+            root.addWidget(self.content_container, 3)
+            root.addWidget(self.avatar)
         else:
             # AI messages: fill the full width
-            root.addWidget(avatar)
-            root.addWidget(self.bubble, 1)
+            root.addWidget(self.avatar)
+            root.addWidget(self.content_container, 1)
 
     def _adjust_height(self):
         self.bubble.document().adjustSize()
@@ -752,26 +762,130 @@ class MessageWidget(QWidget):
         self.bubble.setFixedHeight(int(doc_h) + 24)
 
     def set_message_text(self, text):
-        """Render markdown to HTML and display in bubble."""
+        """Render markdown to HTML and display in bubble, with code blocks below."""
         import markdown as md_lib
-        html_body = md_lib.markdown(
-            text,
-            extensions=["fenced_code", "tables", "nl2br", "sane_lists"],
-        )
+        import re
+
         if self.luna:
             text_color = "#E8F0FF" if self.is_user else "#FFFFFF"
+            code_bg    = "#0A1428"
+            code_border = "#1A3060"
+            code_color  = "#A8D8FF"
+            label_color = "#5A8AE0"
         else:
             text_color = "#E8B97A" if self.is_user else "#D4A068"
-        html = f"""
-        <html><body style="
-            font-family: 'Segoe UI', Arial, sans-serif;
-            font-size: 15px;
-            line-height: 1.6;
-            color: {text_color};
-            margin: 0; padding: 0;
-        ">{html_body}</body></html>
-        """
-        self.bubble.setHtml(html)
+            code_bg    = "#2C1F14"
+            code_border = "#4A3020"
+            code_color  = "#E8C97A"
+            label_color = "#A06830"
+
+        # Split text into segments: plain text and code blocks
+        pattern = r'```(\w*)\n?([\s\S]*?)```'
+        parts = re.split(pattern, text)
+
+        # Collect all plain text (non-code) segments
+        plain_text_parts = []
+        code_blocks = []
+        
+        i = 0
+        while i < len(parts):
+            segment = parts[i]
+            if segment:
+                plain_text_parts.append(segment)
+            i += 1
+            
+            # Check if there's a code block following
+            if i < len(parts):
+                lang = parts[i] or "code"
+                i += 1
+                if i < len(parts):
+                    code = parts[i]
+                    code_blocks.append((lang, code))
+                    i += 1
+
+        # Render all plain text in the bubble
+        combined_text = "\n\n".join(p.strip() for p in plain_text_parts if p.strip())
+        if combined_text:
+            html_body = md_lib.markdown(
+                combined_text,
+                extensions=["tables", "nl2br", "sane_lists"],
+            )
+            html = (f'<html><body style="font-family:Segoe UI,Arial,sans-serif;'
+                    f'font-size:15px;line-height:1.6;color:{text_color};margin:0;padding:0;">'
+                    f'{html_body}</body></html>')
+            self.bubble.setHtml(html)
+
+        # Remove any existing code block widgets from content_layout
+        # Start from index 1 (0 is the bubble)
+        while self.content_layout.count() > 1:
+            item = self.content_layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Add code blocks to the vertical content layout
+        for lang, code in code_blocks:
+            code_frame = QFrame()
+            code_frame.setStyleSheet(
+                f"QFrame {{ background: {code_bg}; border: 1px solid {code_border}; "
+                f"border-radius: 10px; }}"
+            )
+            code_frame_layout = QVBoxLayout(code_frame)
+            code_frame_layout.setContentsMargins(0, 0, 0, 0)
+            code_frame_layout.setSpacing(0)
+
+            # Header bar — language label + copy button
+            header = QWidget()
+            header.setStyleSheet(
+                f"background: rgba(255,255,255,0.05); border-bottom: 1px solid {code_border}; "
+                f"border-top-left-radius: 10px; border-top-right-radius: 10px;"
+            )
+            header_layout = QHBoxLayout(header)
+            header_layout.setContentsMargins(14, 6, 10, 6)
+            header_layout.setSpacing(0)
+
+            lang_label = QLabel(lang.upper() if lang else "CODE")
+            lang_label.setStyleSheet(
+                f"color: {label_color}; font-size: 11px; font-weight: 700; "
+                f"font-family: 'Consolas', monospace; background: transparent; border: none;"
+            )
+            header_layout.addWidget(lang_label)
+            header_layout.addStretch()
+
+            copy_btn = QPushButton("Copy")
+            copy_btn.setFixedHeight(24)
+            copy_btn.setStyleSheet(
+                f"QPushButton {{ color: {label_color}; background: transparent; border: 1px solid {code_border}; "
+                f"border-radius: 4px; font-size: 11px; padding: 0 8px; }}"
+                f"QPushButton:hover {{ background: rgba(255,255,255,0.08); color: white; }}"
+            )
+            captured_code = code
+            copy_btn.clicked.connect(lambda _, c=captured_code: QApplication.clipboard().setText(c))
+            header_layout.addWidget(copy_btn)
+            code_frame_layout.addWidget(header)
+
+            # Code content
+            code_edit = QTextEdit()
+            code_edit.setReadOnly(True)
+            code_edit.setLineWrapMode(QTextEdit.NoWrap)
+            code_edit.setFont(QFont("Consolas", 13))
+            code_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            code_edit.document().setDocumentMargin(0)
+            code_edit.setStyleSheet(
+                f"QTextEdit {{ background: transparent; border: none; "
+                f"color: {code_color}; font-family: Consolas, monospace; "
+                f"font-size: 13px; padding: 14px 16px; }}"
+            )
+            code_edit.setPlainText(code.strip())
+            code_edit.document().adjustSize()
+            code_h = int(code_edit.document().size().height()) + 32
+            code_edit.setFixedHeight(min(code_h, 500))  # cap at 500px, scroll for rest
+            code_frame_layout.addWidget(code_edit)
+            
+            # Add to vertical content layout
+            self.content_layout.addWidget(code_frame)
+
+        # Recalculate height
+        QTimer.singleShot(50, self._adjust_height)
 
     def set_text(self, text):
         """Update the message text (for streaming)"""
@@ -1842,6 +1956,8 @@ class LocalAIApp(QMainWindow):
     def display_response(self, response):
         """Called when streaming is complete"""
         if hasattr(self, 'current_ai_message'):
+            # Ensure final message is fully rendered
+            self.current_ai_widget.set_text(response)
             self.conversation_history.append(AIMessage(content=response))
             self._auto_save()
             self.sidebar.refresh_recent_chats()
@@ -1858,11 +1974,21 @@ class LocalAIApp(QMainWindow):
             self.current_ai_message = ""
             self.current_ai_widget = MessageWidget("", is_user=False, luna=self.use_luna)
             self.message_layout.addWidget(self.current_ai_widget)
+            self.last_update_time = 0
             QTimer.singleShot(0, self._scroll_to_bottom)
 
         self.current_ai_message += chunk
-        self.current_ai_widget.set_text(self.current_ai_message)
-        QTimer.singleShot(0, self._scroll_to_bottom)
+        
+        # Throttle updates to every 100ms for smooth rendering
+        import time
+        current_time = time.time()
+        if not hasattr(self, 'last_update_time'):
+            self.last_update_time = 0
+            
+        if current_time - self.last_update_time >= 0.1:  # 100ms throttle
+            self.current_ai_widget.set_text(self.current_ai_message)
+            self.last_update_time = current_time
+            QTimer.singleShot(0, self._scroll_to_bottom)
 
     def _auto_save(self, also_save_named=False):
         """Auto-save current conversation. Optionally also write a named timestamped file."""
