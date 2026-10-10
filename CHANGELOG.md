@@ -1,5 +1,21 @@
 # Changelog
 
+## Version 1.1.5
+
+### 🧠 Luna 1.1 — Smarter Coding AI
+- Luna upgraded to a custom-trained model (`luna-1.1`) built on Qwen 2.5 Coder 14B
+- Deep training across the full web stack: HTML5, CSS3, JavaScript, TypeScript, React 18, Next.js 14, Tailwind, Node.js, REST APIs, PostgreSQL, Auth.js, security, performance, and testing
+- Luna now catches all React bugs including null crashes, missing useEffect dependencies, and missing key props
+- Tuned inference parameters: lower temperature (0.2) for more precise code, larger context window (32K tokens)
+- 15+ high-quality few-shot examples baked directly into the model
+- Luna's system prompt reinforced with explicit null safety and dependency array rules
+
+### 🎨 Theme Improvements
+- Animated fade transition between Sierra and Luna themes (600ms smooth blend)
+- Stars fade in/out as part of the background transition
+
+---
+
 ## Version 1.0 — Beta Release
 
 ### 🌙 Luna — Coding AI Mode

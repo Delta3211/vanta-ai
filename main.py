@@ -70,9 +70,9 @@ def extract_file_text(path: str) -> str:
 
 
 APP_NAME = "Sierra"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1.5"
 MODEL_NAME = "llama3"
-LUNA_MODEL_NAME = "qwen2.5-coder:14b"
+LUNA_MODEL_NAME = "luna-1.1"
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "sierra-desert-icon.png"
 LUNA_ICON_PATH = Path(__file__).resolve().parent / "assets" / "luna-icon.png"
 CHATS_DIR = Path.home() / ".sierra" / "chats"
@@ -489,8 +489,8 @@ class Sidebar(QFrame):
         if luna:
             self.wordmark.setText("Luna <span>1.0</span>")
             self.descriptor.setText("Your local coding AI")
-            self.model_card_title.setText("Luna 1.0")
-            self.model_card_subtitle.setText("Qwen 2.5 Coder · 14B · Local")
+            self.model_card_title.setText("Luna 1.1")
+            self.model_card_subtitle.setText("Luna 1.1 · 14B · Local")
         else:
             self.wordmark.setText(f"{APP_NAME} <span>{APP_VERSION}</span>")
             self.descriptor.setText("Your local Llama assistant")
@@ -821,12 +821,12 @@ class ModelPanel(QFrame):
         self.panel_icon._luna = luna
         self.panel_icon.update()
         if luna:
-            self.panel_model_name.setText("Qwen 2.5 Coder 14B")
+            self.panel_model_name.setText("Luna 1.1")
             self.panel_description.setText(
-                "Alibaba's Qwen 2.5 Coder 14B, a state-of-the-art coding model running locally."
+                "Custom-trained Luna model optimised for web development — HTML, CSS, JS, React, Next.js and more."
             )
             self.stat_labels["Model Size"].setText("14B parameters")
-            self.stat_labels["Context Window"].setText("128K tokens")
+            self.stat_labels["Context Window"].setText("16,384 tokens")
             self.stat_labels["Quantization"].setText("Q4_K_M (fast)")
         else:
             self.panel_model_name.setText("Llama 3 8B")
