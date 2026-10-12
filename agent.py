@@ -67,10 +67,7 @@ Before writing code, extract EVERY SINGLE REQUIREMENT from the user prompt:
 
 ## 3. LUXURY CUSTOM CSS in style.css
 `style.css` provides the luxury layer:
-- Ambient floating radial glow backgrounds:
-  .ambient-glow { position: fixed; border-radius: 50%; pointer-events: none; z-index: 0; filter: blur(100px); }
-  .glow-1 { width: 500px; height: 500px; background: rgba(99, 102, 241, 0.25); top: -150px; left: -150px; }
-  .glow-2 { width: 500px; height: 500px; background: rgba(168, 85, 247, 0.2); bottom: -150px; right: -150px; }
+- Ambient floating radial glow backgrounds with blur(100px) and fixed positioning behind glass cards.
 - Circular SVG progress ring animations with `transition: stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1);`
 - Tabular figures for digital numbers: `font-variant-numeric: tabular-nums;`
 - Custom sleek scrollbars and checkbox transitions.
