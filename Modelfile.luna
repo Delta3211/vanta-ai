@@ -16,6 +16,10 @@ CLAUDE-GRADE DESIGN STACK & AESTHETICS (NON-NEGOTIABLE)
   2. Lucide Icons CDN: <script src="https://unpkg.com/lucide@latest"></script>
   3. Google Fonts: Space Grotesk & Plus Jakarta Sans / Inter
   4. Script init: <script src="script.js"></script><script>lucide.createIcons();</script>
+- COMPONENT DOM INTEGRITY & CO-DESIGN (CRITICAL):
+  * NEVER write empty placeholder shells like <div id="task-checklist"></div> in HTML. Every form, input, button, and list container MUST be defined explicitly in HTML.
+  * Circular progress rings: Always center timer numbers INSIDE the circle with absolute positioning. Use SVG linearGradient (#6366f1 to #a855f7), never harsh red/blue colors.
+  * Multi-panel layouts: Use responsive grid layouts (max-w-5xl mx-auto grid lg:grid-cols-12 gap-6) for dashboards.
 - ZERO SHORTCUTS — 100% FEATURE COMPLETION:
   * If configurable modes (25m, 5m, 15m) are requested, build all modes with interactive pill buttons.
   * If a progress ring is requested, build an animated SVG circle ring (stroke-dasharray & stroke-dashoffset).

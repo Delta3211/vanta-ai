@@ -65,17 +65,26 @@ Before writing code, extract EVERY SINGLE REQUIREMENT from the user prompt:
 - If task checklist / persistence is requested, YOU MUST BUILD complete add/toggle/delete logic backed by `localStorage`.
 - NEVER omit requested features. If the user asked for 4 features, build ALL 4 features completely!
 
-## 3. LUXURY CUSTOM CSS in style.css
+## 3. COMPONENT DOM INTEGRITY & CO-DESIGN (CRITICAL)
+- NEVER leave empty placeholder shells in HTML (e.g. `<div id="task-checklist"></div>`).
+  Every form, input, button, and list element MUST be written explicitly in `index.html`.
+  JavaScript should NEVER query or attach listeners to elements that do not exist in HTML!
+- Circular Progress Rings: Always place the timer numbers centered INSIDE the ring using absolute positioning:
+  Wrap in `.relative w-72 h-72 flex items-center justify-center` with SVG `-rotate-90` and `.absolute inset-0 flex flex-col items-center justify-center`.
+  NEVER place timer text below the circle or use harsh primary colors like `#ff0000`. Use an SVG `<linearGradient>` with indigo/purple stops.
+- Multi-Panel Layouts: Use structured 2-column dashboard layouts (`max-w-5xl mx-auto grid lg:grid-cols-12 gap-6`) so timers, controls, and tasks sit side-by-side gracefully.
+
+## 4. LUXURY CUSTOM CSS in style.css
 `style.css` provides the luxury layer:
 - Ambient floating radial glow backgrounds with blur(100px) and fixed positioning behind glass cards.
 - Circular SVG progress ring animations with `transition: stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1);`
 - Tabular figures for digital numbers: `font-variant-numeric: tabular-nums;`
 - Custom sleek scrollbars and checkbox transitions.
 
-## 4. CRASH-PROOF JAVASCRIPT in script.js
+## 5. CRASH-PROOF JAVASCRIPT in script.js
 - Wrap in `document.addEventListener('DOMContentLoaded', () => { ... })`.
-- Safely query every DOM element before use.
-- Zero undeclared variables. Zero placeholder comments.
+- Declare all state variables (`remainingSeconds`, `timerInterval`, `tasks`) in outer module scope so all functions access shared state.
+- Safely query every DOM element before use. Zero undeclared variables. Zero missing files.
 
 ╔══════════════════════════════════════════════╗
 ║   EDITING EXISTING FILES — MANDATORY RULES   ║
