@@ -40,13 +40,21 @@ Choose professional filenames: `index.html`, `style.css`, `script.js`, `main.py`
 ╚══════════════════════════════════════════════╝
 When building websites or web apps, these rules are MANDATORY:
 
-## 1. PREMIUM VISUALS
-- Dark mode by default, OR a bold, curated light palette. Never generic colors.
-- Use HSL-tuned color palettes. Define ALL colors as CSS variables at `:root`.
-- Gradients everywhere: linear-gradient, radial-gradient for backgrounds and buttons.
-- Glassmorphism on cards/modals: `background: rgba(255,255,255,0.06); backdrop-filter: blur(16px);`
-- Glowing effects: `box-shadow: 0 0 30px rgba(120, 80, 255, 0.4);`
-- Rounded shapes: `border-radius: 16px` on cards, `border-radius: 999px` on pills/buttons.
+## 1. COMPREHENSIVE CSS & ZERO BARE TAILWIND (CRITICAL)
+- NEVER emit bare Tailwind utility classes in HTML without linking `<script src="https://cdn.tailwindcss.com"></script>` in `<head>`.
+- If writing Vanilla CSS, `style.css` MUST be 100% comprehensive (150-250+ lines). Every container, card, modal, button, input, list, badge, and timer MUST have dedicated, rich CSS rules. NEVER write a 20-line skeleton stylesheet that leaves elements unstyled!
+- Curated Dark Mode: Deep navy/slate/violet backgrounds (e.g. `#080B16`, `#0B0F1F`, `#0F172A`).
+- Ambient Lighting: Fixed radial glow meshes in background (`background: radial-gradient(circle, rgba(99,102,241,0.25) 0%, transparent 70%); filter: blur(80px);`).
+- Glassmorphism: `background: rgba(20, 24, 45, 0.65); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 20px 50px rgba(0,0,0,0.5);`.
+- Typography: Always import Google Fonts (`Space Grotesk`, `Outfit`, `Inter`). Use `font-variant-numeric: tabular-nums;` for clocks, timers, and metrics.
+- Glowing Accents: Linear gradients for buttons (`linear-gradient(135deg, #6366F1, #A855F7)`), glowing shadows (`box-shadow: 0 0 25px rgba(99,102,241,0.4)`).
+
+## 2. CRASH-PROOF JAVASCRIPT & AUDIO (CRITICAL)
+- NEVER refer to undeclared or uninitialized variables (e.g. `timerDisplay` before querying).
+- ALWAYS query DOM elements with null checks: `const display = document.getElementById('timer-display'); if (display) display.textContent = ...`
+- Wrap entire script in `document.addEventListener('DOMContentLoaded', () => { ... })`.
+- For audio sound effects, ALWAYS use Web Audio API oscillators (`new (window.AudioContext || window.webkitAudioContext)()`) so sounds work instantly without external mp3 files.
+- For circular progress rings, dynamically calculate SVG `strokeDasharray` and `strokeDashoffset` from the circle's radius (2 * PI * r).
 
 ## 2. TYPOGRAPHY
 - ALWAYS import from Google Fonts via <link> in <head>.
