@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.2.1
+
+### 🎨 Luna 1.1 Claude-Grade Design & Architecture Masterclass
+- **Trained Model Update (`luna-1.1:latest`)**: Baked Claude-grade visual design standards, Tailwind CSS CDN integration, Lucide vector icons, and Space Grotesk typography directly into model weights via `Modelfile.luna`.
+- **Component DOM Integrity Training**: Reinforced model discipline to never generate empty shell containers (`<div id="...">`); all forms, inputs, badges, and controls are explicitly structured in the HTML markup.
+- **Precision Circular Timers**: Trained model to generate centered SVG progress rings using linear gradients (`#6366f1` to `#a855f7`) with tabular numeric countdowns inside.
+- **Web Audio API Synthesizer**: Baked crash-proof audio generation using the browser's native `AudioContext` sine-wave harmonic ramps (zero missing `.mp3` assets).
+- **Multi-Panel Responsive Dashboards**: Luna now builds production-ready two-column responsive grid interfaces with full LocalStorage goal checklists and animated status badges.
+
 ## Version 1.2.0
 
 ### 🚀 Luna Autonomous Coding Agent (Cursor & Claude-Level Quality)
