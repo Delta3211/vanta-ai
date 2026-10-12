@@ -1,5 +1,33 @@
 # Changelog
 
+## Version 1.2.0
+
+### 🚀 Luna Autonomous Coding Agent (Cursor & Claude-Level Quality)
+- **Active Workspace Integration**: Select any project folder — Luna works directly inside your local workspace with live directory awareness
+- **18 Comprehensive Autonomous Tools**:
+  - `write_file`, `edit_file`, `patch_file`, `append_file`: Surgical and block-based file editing
+  - `read_file`, `list_dir`, `get_file_info`: Deep file system inspection and metadata tracking
+  - `create_dir`, `rename_file`, `delete_file`: Full directory and file lifecycle management
+  - `search_code`, `grep`: Literal and regex-based codebase search with glob filters
+  - `check_syntax`: Pre-flight AST and syntax validation for Python, JS/TS, HTML, CSS, and JSON
+  - `get_file_outline`: Fast structural symbol outline (classes, functions, IDs) for navigating large files
+  - `undo_last_edit`: Instant rollback to the previous snapshot if an edit or test fails
+  - `run_command`: PowerShell / shell execution with real-time output and timeout safety
+  - `scaffold_project`, `open_browser`: Instant template generator and live browser preview
+- **Claude / Antigravity Surgical Code Editing**: Luna automatically discovers existing files in the workspace and edits them surgically instead of recreating them from scratch
+- **3-Tier Robust `edit_file`**: Matching engine with exact, whitespace-normalized, and stripped-line fallback strategies so indentation differences never cause edits to fail
+- **Search / Replace Block Support**: Directly extracts and executes `<<<<<<< SEARCH ... ======= ... >>>>>>>` blocks from AI output
+- **Snippet Overwrite Safeguards**: Protects existing workspace files from accidental truncation when AI models output partial code snippets
+- **Interactive Tool Cards**: Visual cards with pulsing animated borders (`GlowFrame`), status badges, custom tool icons, and formatted details for all 18 tools
+- **Per-Message Action Bar**: Copy response markdown to clipboard and one-click Regenerate button for Claude-style response iteration
+- **Safety Auto-Run Toggle**: Switch between **⚡ Auto-Run: ON** (full autonomous speed) and **⏸ Auto-Run: OFF** (interactive approval buttons for every file change and command)
+- **Interactive Workspace Bar**: Instant workspace switcher, current directory indicator, and refresh button
+- **Sidebar Workspace Explorer**: Live file tree embedded in the sidebar under Luna mode — double-click files to work on them; automatically refreshes on all file/directory changes
+- **25 Autonomous Execution Steps**: Increased max autonomous iteration limit from 15 to 25 for complex multi-file engineering tasks
+- **Emergency Stop Button**: Cancel ongoing agent loops anytime with the red Stop button
+
+---
+
 ## Version 1.1.5
 
 ### 🧠 Luna 1.1 — Smarter Coding AI

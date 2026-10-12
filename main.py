@@ -1,5 +1,6 @@
 import sys
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +28,9 @@ from PyQt5.QtWidgets import (
 )
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
+from workspace import WorkspaceManager
+from agent import AgentThread
+from agent_ui import ToolCardWidget, WorkspaceBar, WorkspaceFileTree
 
 
 def extract_file_text(path: str) -> str:
@@ -70,7 +74,7 @@ def extract_file_text(path: str) -> str:
 
 
 APP_NAME = "Sierra"
-APP_VERSION = "1.1.5"
+APP_VERSION = "1.2.0"
 MODEL_NAME = "llama3"
 LUNA_MODEL_NAME = "luna-1.1"
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "sierra-desert-icon.png"
@@ -148,7 +152,7 @@ class ChatThread(QThread):
 
 
 class SierraMark(QLabel):
-    """Display the supplied desert icon with a gradient background."""
+    """Display the supplied icon with a rounded gradient badge."""
 
     def __init__(self, size=52, luna=False, parent=None):
         super().__init__(parent)
@@ -170,35 +174,34 @@ class SierraMark(QLabel):
         from PyQt5.QtGui import QPainter, QLinearGradient, QColor, QPainterPath
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        r = self._size * 0.28
         path = QPainterPath()
-        path.addRoundedRect(0, 0, self._size, self._size, self._size * 0.23, self._size * 0.23)
+        path.addRoundedRect(0, 0, self._size, self._size, r, r)
         if self._luna:
             grad = QLinearGradient(0, 0, self._size, self._size)
-            grad.setColorAt(0.0, QColor("#0A1040"))
-            grad.setColorAt(1.0, QColor("#050820"))
+            grad.setColorAt(0.0, QColor("#6366F1"))
+            grad.setColorAt(1.0, QColor("#3730A3"))
         else:
             grad = QLinearGradient(0, 0, self._size, self._size)
-            grad.setColorAt(0.0, QColor("#C87838"))
-            grad.setColorAt(0.5, QColor("#8B4520"))
-            grad.setColorAt(1.0, QColor("#4A1E08"))
+            grad.setColorAt(0.0, QColor("#DA7756"))
+            grad.setColorAt(1.0, QColor("#B25638"))
         painter.fillPath(path, grad)
         painter.end()
         super().paintEvent(event)
 
 
 class GradientFrame(QFrame):
-    """A QFrame that paints a gradient border around its contents."""
+    """Refined elevated container with subtle border — adapts to Sierra / Luna theme."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
     def paintEvent(self, event):
-        from PyQt5.QtGui import QPainter, QLinearGradient, QColor, QPainterPath
+        from PyQt5.QtGui import QPainter, QColor, QPainterPath, QPen
         from PyQt5.QtWidgets import QApplication
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        # Detect Luna mode from the main window
         use_luna = False
         app = QApplication.instance()
         if app:
@@ -207,25 +210,25 @@ class GradientFrame(QFrame):
                     use_luna = widget.use_luna
                     break
         if use_luna:
-            grad = QLinearGradient(0, 0, w, h)
-            grad.setColorAt(0.0, QColor("#4A70D8"))
-            grad.setColorAt(0.5, QColor("#1A3A90"))
-            grad.setColorAt(1.0, QColor("#0A1A50"))
+            fill_color = QColor("#141A26")
+            border_color = QColor(255, 255, 255, 22)
+            glow_color = QColor(124, 140, 248, 22)
         else:
-            grad = QLinearGradient(0, 0, w, h)
-            grad.setColorAt(0.0, QColor("#D4874A"))
-            grad.setColorAt(0.5, QColor("#8B4520"))
-            grad.setColorAt(1.0, QColor("#5A2A0C"))
-        outer = QPainterPath()
-        outer.addRoundedRect(0, 0, w, h, 12, 12)
-        inner = QPainterPath()
-        inner.addRoundedRect(1.5, 1.5, w - 3, h - 3, 11, 11)
-        border_path = outer - inner
-        painter.fillPath(border_path, grad)
-        if use_luna:
-            painter.fillPath(inner, QColor("#060A20"))
-        else:
-            painter.fillPath(inner, QColor("#18130F"))
+            fill_color = QColor("#22201C")
+            border_color = QColor(255, 255, 255, 22)
+            glow_color = QColor(218, 119, 86, 22)
+        rad = 18
+        path = QPainterPath()
+        path.addRoundedRect(1, 1, w - 2, h - 2, rad, rad)
+        painter.fillPath(path, fill_color)
+
+        glow_pen = QPen(glow_color, 2)
+        painter.setPen(glow_pen)
+        painter.drawPath(path)
+
+        pen = QPen(border_color, 1)
+        painter.setPen(pen)
+        painter.drawPath(path)
         painter.end()
 
 
@@ -234,50 +237,56 @@ class TrafficButton(QPushButton):
         super().__init__("", parent)
         self.setObjectName(object_name)
         self.setToolTip(tooltip)
-        self.setFixedSize(46, 32)
+        self.setFixedSize(40, 28)
         self.setCursor(Qt.PointingHandCursor)
-        # Add symbols
         if object_name == "trafficClose":
             self.setText("✕")
         elif object_name == "trafficMinimize":
             self.setText("−")
         elif object_name == "trafficMaximize":
-            self.setText("□")
+            self.setText("⬜")
 
 
 class TitleBar(QFrame):
-    """A practical, Windows-friendly frameless title bar in the reference's style."""
+    """Sleek frameless title bar with drag, action buttons and window controls."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("titleBar")
         self._drag_origin = None
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 0, 0, 0)
+        layout.setSpacing(8)
 
-        title_icon = QLabel("✥")
-        title_icon.setObjectName("titleIcon")
-        layout.addWidget(title_icon)
-        title = QLabel("New Chat")
-        title.setObjectName("titleText")
-        layout.addWidget(title)
+        # Active chat breadcrumb
+        crumb_icon = QLabel("◈")
+        crumb_icon.setObjectName("titleIcon")
+        layout.addWidget(crumb_icon)
+        self.title_label = QLabel("New Chat")
+        self.title_label.setObjectName("titleText")
+        layout.addWidget(self.title_label)
         layout.addStretch()
 
-        for glyph, tooltip in (("♜", "Start a new chat"), ("💾", "Save Chat"), ("📂", "Load Chat"), ("⚙", "Settings"), ("◉", "Local profile")):
-            button = QPushButton(glyph)
-            button.setObjectName("topIconButton")
-            button.setToolTip(tooltip)
-            button.setCursor(Qt.PointingHandCursor)
-            if tooltip == "Start a new chat":
-                button.clicked.connect(lambda checked=False: self.window().start_new_chat())
+        # Action buttons
+        for glyph, tooltip, obj in (
+            ("✎",  "New Chat",  "titleNewChat"),
+            ("💾", "Save Chat", "titleSave"),
+            ("📂", "Open Chat", "titleOpen"),
+        ):
+            btn = QPushButton(glyph)
+            btn.setObjectName("topIconButton")
+            btn.setToolTip(tooltip)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedSize(36, 36)
+            if tooltip == "New Chat":
+                btn.clicked.connect(lambda checked=False: self.window().start_new_chat())
             elif tooltip == "Save Chat":
-                button.clicked.connect(lambda checked=False: self.window().save_conversation())
-            elif tooltip == "Load Chat":
-                button.clicked.connect(lambda checked=False: self.window().load_conversation())
-            layout.addWidget(button)
+                btn.clicked.connect(lambda checked=False: self.window().save_conversation())
+            elif tooltip == "Open Chat":
+                btn.clicked.connect(lambda checked=False: self.window().load_conversation())
+            layout.addWidget(btn)
 
-        # Add window controls on the right
+        layout.addSpacing(4)
         layout.addWidget(WindowControls())
 
     def _toggle_maximize(self):
@@ -343,10 +352,10 @@ class ChatInput(QTextEdit):
 
 class NavButton(QPushButton):
     def __init__(self, icon, label, parent=None):
-        super().__init__(f"{icon}    {label}", parent)
+        super().__init__(f"{icon}   {label}", parent)
         self.setObjectName("navButton")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(48)
+        self.setMinimumHeight(40)
         self.setCheckable(True)
 
 
@@ -355,17 +364,17 @@ class RecentChat(QPushButton):
         super().__init__(parent)
         self.setObjectName("recentChat")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(54)
+        self.setMinimumHeight(44)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(12)
-        icon = QLabel("▢")
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
+        icon = QLabel("💬")
         icon.setObjectName("recentIcon")
         icon.setAlignment(Qt.AlignCenter)
-        icon.setFixedSize(32, 32)
+        icon.setFixedSize(26, 26)
         layout.addWidget(icon)
         labels = QVBoxLayout()
-        labels.setSpacing(3)
+        labels.setSpacing(2)
         name = QLabel(title)
         name.setObjectName("recentName")
         time = QLabel(age)
@@ -380,37 +389,38 @@ class Sidebar(QFrame):
     new_chat_requested = pyqtSignal()
     search_toggled = pyqtSignal(bool)
     luna_toggled = pyqtSignal(bool)
-    chat_loaded = pyqtSignal(str)  # Signal with file path
+    chat_loaded = pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, workspace=None, parent=None):
         super().__init__(parent)
+        self.workspace = workspace
         self.setObjectName("sidebar")
-        self.setFixedWidth(316)
+        self.setFixedWidth(270)
         self._build()
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 32, 18, 24)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 22, 14, 18)
+        layout.setSpacing(8)
 
         brand_row = QHBoxLayout()
-        brand_row.setSpacing(12)
-        self.brand_icon = SierraMark(48)
+        brand_row.setSpacing(10)
+        self.brand_icon = SierraMark(40)
         brand_row.addWidget(self.brand_icon)
         brand_copy = QVBoxLayout()
-        brand_copy.setSpacing(2)
+        brand_copy.setSpacing(1)
         self.wordmark = QLabel(f"{APP_NAME} <span>{APP_VERSION}</span>")
         self.wordmark.setObjectName("wordmark")
-        self.descriptor = QLabel("Your local Llama assistant")
+        self.descriptor = QLabel("Your private AI assistant")
         self.descriptor.setObjectName("brandDescription")
         brand_copy.addWidget(self.wordmark)
         brand_copy.addWidget(self.descriptor)
         brand_row.addLayout(brand_copy)
         brand_row.addStretch()
         layout.addLayout(brand_row)
-        layout.addSpacing(30)
+        layout.addSpacing(22)
 
-        self.new_chat = NavButton("✎", "New Chat")
+        self.new_chat = NavButton("＋", "New Chat")
         self.new_chat.setObjectName("navButtonActive")
         self.new_chat.setChecked(True)
         self.new_chat.clicked.connect(self._new_chat)
@@ -434,9 +444,9 @@ class Sidebar(QFrame):
         layout.addWidget(divider)
         layout.addSpacing(14)
 
-        recent_heading = QLabel("Recent Chats")
-        recent_heading.setObjectName("sectionHeading")
-        layout.addWidget(recent_heading)
+        self.recent_heading = QLabel("Recent Chats")
+        self.recent_heading.setObjectName("sectionHeading")
+        layout.addWidget(self.recent_heading)
 
         # Load actual saved chats
         self.recent_chats_widget = QWidget()
@@ -445,6 +455,12 @@ class Sidebar(QFrame):
         self.recent_chats_layout.setSpacing(6)
         self._load_recent_chats()
         layout.addWidget(self.recent_chats_widget)
+
+        # Workspace File Tree (visible in Luna mode)
+        self.file_tree = WorkspaceFileTree(self.workspace or WorkspaceManager())
+        self.file_tree.setVisible(False)
+        layout.addWidget(self.file_tree)
+
         layout.addStretch()
 
         model_card = QFrame()
@@ -473,7 +489,7 @@ class Sidebar(QFrame):
         layout.addWidget(model_card)
 
     def update_branding(self, luna=False):
-        """Swap sidebar logo, wordmark and model card between Sierra and Luna."""
+        """Swap sidebar logo, wordmark, model card, and explorer between Sierra and Luna."""
         from PyQt5.QtGui import QPixmap
         icon_path = LUNA_ICON_PATH if luna and LUNA_ICON_PATH.exists() else ICON_PATH
         pixmap = QPixmap(str(icon_path))
@@ -487,15 +503,27 @@ class Sidebar(QFrame):
         self.brand_icon.update()
         self.model_card_icon.update()
         if luna:
-            self.wordmark.setText("Luna <span>1.0</span>")
-            self.descriptor.setText("Your local coding AI")
+            self.wordmark.setText("Luna <span>Agent</span>")
+            self.descriptor.setText("Autonomous Coding AI")
             self.model_card_title.setText("Luna 1.1")
             self.model_card_subtitle.setText("Luna 1.1 · 14B · Local")
+            if hasattr(self, 'recent_heading'):
+                self.recent_heading.setText("Workspace Files")
+            if hasattr(self, 'file_tree'):
+                self.file_tree.setVisible(True)
+            if hasattr(self, 'recent_chats_widget'):
+                self.recent_chats_widget.setVisible(False)
         else:
             self.wordmark.setText(f"{APP_NAME} <span>{APP_VERSION}</span>")
             self.descriptor.setText("Your local Llama assistant")
             self.model_card_title.setText(f"{APP_NAME} {APP_VERSION}")
             self.model_card_subtitle.setText("Llama 3 · 8B · Local")
+            if hasattr(self, 'recent_heading'):
+                self.recent_heading.setText("Recent Chats")
+            if hasattr(self, 'file_tree'):
+                self.file_tree.setVisible(False)
+            if hasattr(self, 'recent_chats_widget'):
+                self.recent_chats_widget.setVisible(True)
 
     def _new_chat(self):
         self._select(self.new_chat)
@@ -593,14 +621,14 @@ class ActionCard(QPushButton):
         self.prompt = prompt
         self.setObjectName("actionCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(84)
+        self.setMinimumHeight(72)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 12, 14, 12)
+        layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(12)
         icon_label = QLabel(icon)
         icon_label.setObjectName("actionIcon")
         icon_label.setAlignment(Qt.AlignCenter)
-        icon_label.setFixedSize(40, 40)
+        icon_label.setFixedSize(36, 36)
         layout.addWidget(icon_label)
         copy = QVBoxLayout()
         copy.setSpacing(2)
@@ -608,6 +636,7 @@ class ActionCard(QPushButton):
         heading.setObjectName("actionTitle")
         detail = QLabel(subtitle)
         detail.setObjectName("actionSubtitle")
+        detail.setWordWrap(True)
         copy.addWidget(heading)
         copy.addWidget(detail)
         layout.addLayout(copy, 1)
@@ -626,57 +655,59 @@ class WelcomeView(QWidget):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(54, 30, 54, 30)
+        layout.setContentsMargins(56, 24, 56, 24)
         layout.setSpacing(0)
         layout.addStretch(1)
 
         mark_row = QHBoxLayout()
         mark_row.addStretch()
-        mark_row.addWidget(SierraMark(94, luna=self._luna))
+        mark_row.addWidget(SierraMark(68, luna=self._luna))
         mark_row.addStretch()
         layout.addLayout(mark_row)
-        layout.addSpacing(22)
+        layout.addSpacing(18)
 
         if self._luna:
-            title = QLabel("Luna <span>1.0</span>")
-            subtitle_text = "Your local coding AI assistant."
-            desc_text = "Write, debug, and understand code with a model built for developers."
+            title = QLabel("Luna <span>Agent</span>")
+            subtitle_text = "How can I help you build today?"
+            desc_text = "Autonomous coding AI with workspace awareness · Reads files, writes code, and runs tools."
         else:
             title = QLabel(f"{APP_NAME} <span>{APP_VERSION}</span>")
-            subtitle_text = "Your local Llama assistant."
-            desc_text = "Ask me anything, get help with your ideas, or just have a conversation."
+            subtitle_text = "How can I help you today?"
+            desc_text = "Ask questions, analyze documents, write and review code, or explore ideas."
 
         title.setObjectName("heroTitle")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
+        layout.addSpacing(8)
         subtitle = QLabel(subtitle_text)
         subtitle.setObjectName("heroSubtitle")
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
-        layout.addSpacing(25)
+        layout.addSpacing(6)
         description = QLabel(desc_text)
         description.setObjectName("heroDescription")
         description.setAlignment(Qt.AlignCenter)
+        description.setWordWrap(True)
         layout.addWidget(description)
-        layout.addSpacing(46)
+        layout.addSpacing(34)
 
         if self._luna:
             entries = (
-                ("</>", "Write code", "Generate clean, production-ready code.", "Write clean code for: "),
-                ("🐛", "Debug", "Find and fix bugs fast.", "Debug this code and explain the fix: "),
-                ("▤", "Explain", "Understand any code or concept.", "Explain this code in simple terms: "),
-                ("⚡", "Optimise", "Make code faster and cleaner.", "Optimise this code for performance: "),
+                ("⚡", "Run & Build",       "Execute tests or shell commands in project.", "Run tests and verify our current workspace: "),
+                ("📝", "Create Feature",     "Write new modules, files, or components.",    "Create a new feature for: "),
+                ("🐛", "Diagnose & Fix",     "Inspect files and repair bugs.",              "Find and fix bugs in our project: "),
+                ("📁", "Explore Codebase",   "Survey project architecture and files.",      "Analyze this workspace and describe its key components."),
             )
         else:
             entries = (
-                ("◉", "Get answers", "Ask questions about anything.", "Answer this question clearly: "),
-                ("</>", "Write code", "Debug, build, or learn to code.", "Help me write clean code for: "),
-                ("▤", "Summarise", "Turn long text into short summaries.", "Summarise the following in clear bullet points: "),
-                ("✦", "Be creative", "Brainstorm ideas and more.", "Brainstorm original ideas for: "),
+                ("✦", "Explain a Topic",     "Break down complex ideas with clarity.",      "Explain this concept clearly and intuitively: "),
+                ("</>", "Write & Debug",      "Build features, fix bugs, or optimize.",      "Help me write clean code for: "),
+                ("▤", "Summarize Notes",     "Extract key takeaways and action items.",     "Summarize the following in clear bullet points: "),
+                ("✧", "Brainstorm Ideas",    "Explore fresh strategies and creative plans.","Brainstorm practical and creative ideas for: "),
             )
         cards = QGridLayout()
-        cards.setHorizontalSpacing(18)
-        cards.setVerticalSpacing(17)
+        cards.setHorizontalSpacing(14)
+        cards.setVerticalSpacing(12)
         for index, (icon, title_text, detail, prompt) in enumerate(entries):
             card = ActionCard(icon, title_text, detail, prompt)
             card.clicked.connect(lambda checked=False, text=prompt: self.prompt_chosen.emit(text))
@@ -686,182 +717,286 @@ class WelcomeView(QWidget):
 
 
 class MessageWidget(QWidget):
+    regenerate_requested = pyqtSignal(object)   # emits self
+
     def __init__(self, message, is_user, luna=False, parent=None):
         super().__init__(parent)
-        self.is_user = is_user
-        self.luna = luna
+        self.is_user  = is_user
+        self.luna     = luna
+        self._raw_text = message  # keep original markdown for copy
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(0, 4, 0, 4)
-        root.setSpacing(11)
+        root.setContentsMargins(0, 2, 0, 2)
+        root.setSpacing(12)
 
-        self.avatar = QLabel("YOU" if is_user else "AI")
+        # Avatar - Claude style starburst for AI
+        av_text = "YOU" if is_user else "\u273b"
+        self.avatar = QLabel(av_text)
         self.avatar.setObjectName("userAvatar" if is_user else "assistantAvatar")
         self.avatar.setFixedSize(32, 32)
-        self.avatar.setAlignment(Qt.AlignTop | Qt.AlignCenter)
-        
-        # Create a vertical container for bubble + code blocks
+        self.avatar.setAlignment(Qt.AlignCenter)
+
+        # Outer column: avatar + content + action bar
+        col_widget = QWidget()
+        col_widget.setStyleSheet("background: transparent;")
+        col_layout = QVBoxLayout(col_widget)
+        col_layout.setContentsMargins(0, 0, 0, 0)
+        col_layout.setSpacing(0)
+
+        # Content container (bubble + code blocks)
         self.content_container = QWidget()
         self.content_container.setStyleSheet("background: transparent;")
         self.content_layout = QVBoxLayout(self.content_container)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(8)
+        self.content_layout.setSpacing(10)
 
         self.bubble = QTextEdit()
         self.bubble.setObjectName("userMessage" if is_user else "assistantMessage")
         self.bubble.setReadOnly(True)
         self.bubble.setLineWrapMode(QTextEdit.WidgetWidth)
-        self.bubble.setFont(QFont("Segoe UI", 15))
+        self.bubble.setFont(QFont("Segoe UI", 14))
         self.bubble.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.bubble.setMinimumHeight(52)
-        self.bubble.document().setDocumentMargin(8)
+        self.bubble.setMinimumHeight(44)
+        self.bubble.document().setDocumentMargin(8 if is_user else 2)
 
         if is_user:
             if luna:
                 self.bubble.setStyleSheet(
-                    "QTextEdit { background: #0D1A3A; color: #E8F0FF; border-radius: 12px; "
-                    "padding: 12px 16px; border: 1px solid #2A4090; font-size: 15px; }"
+                    "QTextEdit { background: #162032; color: #F0F4FC; "
+                    "border-radius: 16px; padding: 12px 18px; "
+                    "border: 1px solid #23314D; font-size: 14px; }"
                 )
             else:
                 self.bubble.setStyleSheet(
-                    "QTextEdit { background: #3D2A1A; color: #E8B97A; border-radius: 12px; "
-                    "padding: 12px 16px; border: 1px solid #6B4428; font-size: 15px; }"
+                    "QTextEdit { background: #2A2722; color: #FAF7F2; "
+                    "border-radius: 16px; padding: 12px 18px; "
+                    "border: 1px solid rgba(255,255,255,0.08); font-size: 14px; }"
                 )
         else:
+            # Claude style: AI responses flow naturally unboxed
             if luna:
                 self.bubble.setStyleSheet(
-                    "QTextEdit { background: #071030; color: #FFFFFF; border-radius: 12px; "
-                    "padding: 12px 16px; border: 1px solid #1A2E70; font-size: 15px; }"
+                    "QTextEdit { background: transparent; color: #F0F4F8; "
+                    "border: none; padding: 2px 4px; font-size: 14px; }"
                 )
             else:
                 self.bubble.setStyleSheet(
-                    "QTextEdit { background: #2C2018; color: #D4A068; border-radius: 12px; "
-                    "padding: 12px 16px; border: 1px solid #4A3020; font-size: 15px; }"
+                    "QTextEdit { background: transparent; color: #ECE8E1; "
+                    "border: none; padding: 2px 4px; font-size: 14px; }"
                 )
-        
-        # Add bubble to content container
+
         self.content_layout.addWidget(self.bubble)
+        col_layout.addWidget(self.content_container)
+
+        # ── Action bar (AI messages only) ──────────────────────────────────
+        if not is_user:
+            self._action_bar = self._build_action_bar()
+            col_layout.addWidget(self._action_bar)
 
         self.set_message_text(message)
         self._adjust_height()
 
         if is_user:
-            # User messages: bubble hugs right, grows left for longer text (max 75% width)
             root.addStretch(1)
-            root.addWidget(self.content_container, 3)
+            root.addWidget(col_widget, 3)
             root.addWidget(self.avatar)
         else:
-            # AI messages: fill the full width
             root.addWidget(self.avatar)
-            root.addWidget(self.content_container, 1)
+            root.addWidget(col_widget, 1)
+
+    def _build_action_bar(self):
+        """Build the slim row of action buttons shown under AI messages."""
+        accent = "#7C8CF8" if self.luna else "#DA7756"
+        bar = QWidget()
+        bar.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(2, 4, 0, 0)
+        lay.setSpacing(4)
+
+        _btn_style = (
+            "QPushButton { color: #7D796F; background: transparent; border: none; "
+            "border-radius: 5px; font-size: 11px; padding: 3px 8px; font-weight: 500; }"
+            f"QPushButton:hover {{ color: {accent}; background: rgba(255,255,255,0.05); }}"
+        )
+
+        copy_btn = QPushButton("\u2398  Copy")
+        copy_btn.setObjectName("msgActionBtn")
+        copy_btn.setToolTip("Copy response to clipboard")
+        copy_btn.setCursor(Qt.PointingHandCursor)
+        copy_btn.setStyleSheet(_btn_style)
+        copy_btn.clicked.connect(self._copy_response)
+        lay.addWidget(copy_btn)
+        self._copy_btn = copy_btn
+
+        regen_btn = QPushButton("\u21ba  Regenerate")
+        regen_btn.setObjectName("msgActionBtn")
+        regen_btn.setToolTip("Re-run this response")
+        regen_btn.setCursor(Qt.PointingHandCursor)
+        regen_btn.setStyleSheet(_btn_style)
+        regen_btn.clicked.connect(lambda: self.regenerate_requested.emit(self))
+        lay.addWidget(regen_btn)
+        self._regen_btn = regen_btn
+
+        lay.addStretch()
+        return bar
+
+    def _copy_response(self):
+        QApplication.clipboard().setText(self._raw_text)
+        self._copy_btn.setText("\u2713  Copied!")
+        QTimer.singleShot(2000, lambda: self._copy_btn.setText("\u2398  Copy"))
 
     def _adjust_height(self):
         self.bubble.document().adjustSize()
         doc_h = self.bubble.document().size().height()
-        self.bubble.setFixedHeight(int(doc_h) + 24)
+        self.bubble.setFixedHeight(int(doc_h) + 20)
 
     def set_message_text(self, text):
-        """Render markdown to HTML and display in bubble, with code blocks below."""
+        """Render markdown to HTML in bubble; render code blocks as premium panels below."""
         import markdown as md_lib
         import re
 
         if self.luna:
-            text_color = "#E8F0FF" if self.is_user else "#FFFFFF"
-            code_bg    = "#0A1428"
-            code_border = "#1A3060"
-            code_color  = "#A8D8FF"
-            label_color = "#5A8AE0"
+            text_color = "#F0F4FC" if self.is_user else "#F0F4F8"
         else:
-            text_color = "#E8B97A" if self.is_user else "#D4A068"
-            code_bg    = "#2C1F14"
-            code_border = "#4A3020"
-            code_color  = "#E8C97A"
-            label_color = "#A06830"
+            text_color = "#FAF7F2" if self.is_user else "#ECE8E1"
 
-        # Split text into segments: plain text and code blocks
+        # ── Language-specific color themes ─────────────────────────────────
+        _LANG_THEMES = {
+            "html":       ("#FF8C42", "#1A0C00", "#2A1200", "#FFB347"),
+            "css":        ("#C084FC", "#120A1A", "#1E1028", "#DDD6FE"),
+            "scss":       ("#C084FC", "#120A1A", "#1E1028", "#DDD6FE"),
+            "javascript": ("#FCD34D", "#131000", "#1F1A00", "#FEF08A"),
+            "js":         ("#FCD34D", "#131000", "#1F1A00", "#FEF08A"),
+            "typescript": ("#60A5FA", "#020C1A", "#081428", "#BFDBFE"),
+            "ts":         ("#60A5FA", "#020C1A", "#081428", "#BFDBFE"),
+            "jsx":        ("#67E8F9", "#001414", "#002020", "#A5F3FC"),
+            "tsx":        ("#67E8F9", "#001414", "#002020", "#A5F3FC"),
+            "python":     ("#4ADE80", "#011A08", "#032810", "#BBF7D0"),
+            "py":         ("#4ADE80", "#011A08", "#032810", "#BBF7D0"),
+            "bash":       ("#34D399", "#011A0E", "#022816", "#A7F3D0"),
+            "sh":         ("#34D399", "#011A0E", "#022816", "#A7F3D0"),
+            "json":       ("#FBBF24", "#130E00", "#1F1600", "#FDE68A"),
+            "yaml":       ("#A78BFA", "#0D0A1A", "#160F28", "#C4B5FD"),
+            "sql":        ("#FB923C", "#1A0A00", "#281000", "#FDBA74"),
+            "go":         ("#67E8F9", "#001414", "#002020", "#A5F3FC"),
+            "rust":       ("#FB923C", "#1A0A00", "#281000", "#FDBA74"),
+            "rs":         ("#FB923C", "#1A0A00", "#281000", "#FDBA74"),
+        }
+        _DEFAULT_THEME = ("#94A3B8", "#080C14", "#0E1420", "#CBD5E1")
+
+        # ── Split text into plain text + code blocks ────────────────────────
         pattern = r'```(\w*)\n?([\s\S]*?)```'
-        parts = re.split(pattern, text)
+        parts   = re.split(pattern, text)
 
-        # Collect all plain text (non-code) segments
-        plain_text_parts = []
+        plain_parts = []
         code_blocks = []
-        
         i = 0
         while i < len(parts):
-            segment = parts[i]
-            if segment:
-                plain_text_parts.append(segment)
+            seg = parts[i]
+            if seg:
+                plain_parts.append(seg)
             i += 1
-            
-            # Check if there's a code block following
             if i < len(parts):
                 lang = parts[i] or "code"
                 i += 1
                 if i < len(parts):
-                    code = parts[i]
-                    code_blocks.append((lang, code))
+                    code_blocks.append((lang, parts[i]))
                     i += 1
 
-        # Render all plain text in the bubble
-        combined_text = "\n\n".join(p.strip() for p in plain_text_parts if p.strip())
-        if combined_text:
+        # ── Render plain text ──────────────────────────────────────────────
+        combined = "\n\n".join(p.strip() for p in plain_parts if p.strip())
+        if combined:
             html_body = md_lib.markdown(
-                combined_text,
+                combined,
                 extensions=["tables", "nl2br", "sane_lists"],
             )
-            html = (f'<html><body style="font-family:Segoe UI,Arial,sans-serif;'
-                    f'font-size:15px;line-height:1.6;color:{text_color};margin:0;padding:0;">'
-                    f'{html_body}</body></html>')
+            html = (
+                f'<html><body style="font-family: Segoe UI, Inter, Arial, sans-serif;'
+                f'font-size:15px;line-height:1.7;color:{text_color};margin:0;padding:0;">'
+                f'{html_body}</body></html>'
+            )
             self.bubble.setHtml(html)
 
-        # Remove any existing code block widgets from content_layout
-        # Start from index 1 (0 is the bubble)
+        # ── Remove stale code block panels ────────────────────────────────
         while self.content_layout.count() > 1:
             item = self.content_layout.takeAt(1)
             if item.widget():
                 item.widget().deleteLater()
 
-        # Add code blocks to the vertical content layout
+        # ── Render code block panels ───────────────────────────────────────
+        cb_bg = "#0C1017" if self.luna else "#141311"
+        hdr_bg = "#131924" if self.luna else "#1B1A17"
+        code_color = "#E2E8F0" if self.luna else "#E6E2D8"
+        accent_color = "#7C8CF8" if self.luna else "#DA7756"
+
         for lang, code in code_blocks:
+            # Outer frame
             code_frame = QFrame()
             code_frame.setStyleSheet(
-                f"QFrame {{ background: {code_bg}; border: 1px solid {code_border}; "
+                f"QFrame {{ background: {cb_bg}; border: 1px solid rgba(255,255,255,0.08); "
                 f"border-radius: 10px; }}"
             )
-            code_frame_layout = QVBoxLayout(code_frame)
-            code_frame_layout.setContentsMargins(0, 0, 0, 0)
-            code_frame_layout.setSpacing(0)
+            cf_lay = QVBoxLayout(code_frame)
+            cf_lay.setContentsMargins(0, 0, 0, 0)
+            cf_lay.setSpacing(0)
 
-            # Header bar — language label + copy button
-            header = QWidget()
-            header.setStyleSheet(
-                f"background: rgba(255,255,255,0.05); border-bottom: 1px solid {code_border}; "
+            # Header bar
+            hdr_widget = QWidget()
+            hdr_widget.setStyleSheet(
+                f"background: {hdr_bg}; "
+                f"border-bottom: 1px solid rgba(255,255,255,0.06); "
                 f"border-top-left-radius: 10px; border-top-right-radius: 10px;"
             )
-            header_layout = QHBoxLayout(header)
-            header_layout.setContentsMargins(14, 6, 10, 6)
-            header_layout.setSpacing(0)
+            hdr_lay = QHBoxLayout(hdr_widget)
+            hdr_lay.setContentsMargins(14, 6, 10, 6)
+            hdr_lay.setSpacing(8)
 
-            lang_label = QLabel(lang.upper() if lang else "CODE")
-            lang_label.setStyleSheet(
-                f"color: {label_color}; font-size: 11px; font-weight: 700; "
-                f"font-family: 'Consolas', monospace; background: transparent; border: none;"
+            # Language pill badge
+            lang_pill = QLabel(lang.upper() if lang else "CODE")
+            lang_pill.setStyleSheet(
+                f"color: #A8A398; background: rgba(255,255,255,0.05); "
+                f"border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; "
+                f"font-size: 11px; font-weight: 700; "
+                f"font-family: 'Consolas', monospace; "
+                f"padding: 2px 7px; letter-spacing: 0.5px;"
             )
-            header_layout.addWidget(lang_label)
-            header_layout.addStretch()
+            hdr_lay.addWidget(lang_pill)
+            hdr_lay.addStretch()
 
-            copy_btn = QPushButton("Copy")
-            copy_btn.setFixedHeight(24)
-            copy_btn.setStyleSheet(
-                f"QPushButton {{ color: {label_color}; background: transparent; border: 1px solid {code_border}; "
-                f"border-radius: 4px; font-size: 11px; padding: 0 8px; }}"
-                f"QPushButton:hover {{ background: rgba(255,255,255,0.08); color: white; }}"
+            # Save to workspace button
+            save_btn = QPushButton("💾  Save to File")
+            save_btn.setFixedHeight(26)
+            save_btn.setCursor(Qt.PointingHandCursor)
+            save_btn.setStyleSheet(
+                f"QPushButton {{ color: {accent_color}; background: {accent_color}18; "
+                f"border: 1px solid {accent_color}35; border-radius: 5px; "
+                f"font-size: 11px; font-weight: 600; padding: 0 10px; margin-right: 4px; }}"
+                f"QPushButton:hover {{ background: {accent_color}30; color: white; }}"
             )
             captured_code = code
-            copy_btn.clicked.connect(lambda _, c=captured_code: QApplication.clipboard().setText(c))
-            header_layout.addWidget(copy_btn)
-            code_frame_layout.addWidget(header)
+            captured_lang = lang
+            save_btn.clicked.connect(
+                lambda _, c=captured_code, l=captured_lang, b=save_btn:
+                    self._save_code_to_workspace(c, l, b)
+            )
+            hdr_lay.addWidget(save_btn)
+
+            # Copy button
+            copy_btn = QPushButton("Copy")
+            copy_btn.setFixedHeight(26)
+            copy_btn.setCursor(Qt.PointingHandCursor)
+            copy_btn.setStyleSheet(
+                f"QPushButton {{ color: #A8A398; background: rgba(255,255,255,0.04); "
+                f"border: 1px solid rgba(255,255,255,0.08); border-radius: 5px; "
+                f"font-size: 11px; font-weight: 600; padding: 0 10px; }}"
+                f"QPushButton:hover {{ background: rgba(255,255,255,0.10); color: white; }}"
+            )
+            copy_btn.clicked.connect(
+                lambda _, c=captured_code: QApplication.clipboard().setText(c)
+            )
+            hdr_lay.addWidget(copy_btn)
+            cf_lay.addWidget(hdr_widget)
 
             # Code content
             code_edit = QTextEdit()
@@ -872,46 +1007,145 @@ class MessageWidget(QWidget):
             code_edit.document().setDocumentMargin(0)
             code_edit.setStyleSheet(
                 f"QTextEdit {{ background: transparent; border: none; "
-                f"color: {code_color}; font-family: Consolas, monospace; "
-                f"font-size: 13px; padding: 14px 16px; }}"
+                f"color: {code_color}; "
+                f"font-family: 'Cascadia Code', 'Consolas', monospace; "
+                f"font-size: 13px; padding: 14px 18px; }}"
+                f"QScrollBar:horizontal {{ background: transparent; height: 5px; border-radius: 3px; }}"
+                f"QScrollBar::handle:horizontal {{ background: rgba(255,255,255,0.15); border-radius: 3px; }}"
             )
             code_edit.setPlainText(code.strip())
             code_edit.document().adjustSize()
-            code_h = int(code_edit.document().size().height()) + 32
-            code_edit.setFixedHeight(min(code_h, 500))  # cap at 500px, scroll for rest
-            code_frame_layout.addWidget(code_edit)
-            
-            # Add to vertical content layout
+            code_h = int(code_edit.document().size().height()) + 36
+            code_edit.setFixedHeight(min(code_h, 520))
+            cf_lay.addWidget(code_edit)
+
             self.content_layout.addWidget(code_frame)
 
-        # Recalculate height
         QTimer.singleShot(50, self._adjust_height)
+
+    def _save_code_to_workspace(self, code_text, lang, btn):
+        """Save this code block directly into the active workspace."""
+        from agent import detect_file_from_code_block
+        from PyQt5.QtWidgets import QInputDialog
+
+        # Always use the app's shared WorkspaceManager so files go to the user's chosen workspace
+        parent_win = self.window()
+        if hasattr(parent_win, 'workspace'):
+            wm = parent_win.workspace
+        else:
+            from workspace import WorkspaceManager
+            wm = WorkspaceManager()
+
+        guessed_name = detect_file_from_code_block(code_text, lang_tag=lang)
+        if not guessed_name:
+            ext_map = {
+                "python": "py", "javascript": "js", "typescript": "ts",
+                "html": "html", "css": "css", "json": "json", "bash": "sh",
+                "shell": "sh", "yaml": "yaml", "go": "go", "rust": "rs",
+                "cpp": "cpp", "c": "c", "java": "java",
+            }
+            ext = ext_map.get(lang.lower(), "txt")
+            guessed_name = f"main.{ext}"
+
+        file_path, ok = QInputDialog.getText(
+            self,
+            "Save to Workspace",
+            f"Enter file path (relative to workspace root '{wm.root.name}'):",
+            text=guessed_name
+        )
+        if ok and file_path.strip():
+            res = wm.write_file(file_path.strip(), code_text)
+            if res.get("success"):
+                btn.setText(f"✓ Saved → {Path(file_path.strip()).name}")
+                btn.setStyleSheet(
+                    "QPushButton { color: #A5D6A7; background: #1B5E20; border: 1px solid #2E7D32; "
+                    "border-radius: 4px; font-size: 11px; padding: 0 8px; font-weight: bold; margin-right: 6px; }"
+                )
+                if hasattr(parent_win, 'sidebar') and hasattr(parent_win.sidebar, 'file_tree'):
+                    parent_win.sidebar.file_tree.refresh_tree()
+                if hasattr(parent_win, 'workspace_bar'):
+                    parent_win.workspace_bar.update_workspace()
+            else:
+                btn.setText("⚠ Error saving")
+                btn.setToolTip(res.get("error", "Unknown error"))
 
     def set_text(self, text):
         """Update the message text (for streaming)"""
+        self._raw_text = text
         self.set_message_text(text)
         self._adjust_height()
 
 
 class ThinkingWidget(QFrame):
-    def __init__(self, parent=None):
+    """Animated thinking indicator with pulsing starburst and clean phrasing."""
+
+    _PHRASES_LUNA   = ["Thinking…", "Planning next step…", "Analyzing workspace…", "Synthesizing solution…"]
+    _PHRASES_SIERRA = ["Thinking…", "Searching context…", "Formulating response…", "Polishing thoughts…"]
+
+    def __init__(self, luna: bool = False, parent=None):
         super().__init__(parent)
+        self.luna  = luna
         self.setObjectName("thinkingWidget")
+
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 8)
-        layout.setSpacing(11)
-        layout.addWidget(SierraMark(30))
+        layout.setContentsMargins(4, 8, 4, 8)
+        layout.setSpacing(10)
+
+        col = "#7C8CF8" if luna else "#DA7756"
+        badge_bg = "rgba(124, 140, 248, 0.12)" if luna else "rgba(218, 119, 86, 0.12)"
+        badge_bdr = "rgba(124, 140, 248, 0.28)" if luna else "rgba(218, 119, 86, 0.28)"
+
+        self.icon_badge = QLabel("✻")
+        self.icon_badge.setFixedSize(28, 28)
+        self.icon_badge.setAlignment(Qt.AlignCenter)
+        self.icon_badge.setStyleSheet(
+            f"QLabel {{ color: {col}; background: {badge_bg}; "
+            f"border: 1px solid {badge_bdr}; border-radius: 7px; "
+            f"font-size: 15px; font-weight: bold; }}"
+        )
+        layout.addWidget(self.icon_badge)
+
         self.label = QLabel()
         self.label.setObjectName("thinkingText")
+        self.label.setFont(QFont("Segoe UI", 12, QFont.Medium))
+        self.label.setStyleSheet(f"color: {col}; background: transparent;")
         layout.addWidget(self.label)
-        self.timer = QTimer(self)
+
+        self._dot_row = QHBoxLayout()
+        self._dot_row.setSpacing(3)
+        self._dot_row.setContentsMargins(0, 0, 0, 0)
+        self._dots = []
+        for _ in range(3):
+            d = QLabel("●")
+            d.setStyleSheet(f"color: {col}; font-size: 6px; background: transparent;")
+            self._dot_row.addWidget(d)
+            self._dots.append(d)
+        layout.addLayout(self._dot_row)
+        layout.addStretch()
+
+        self._phrase_idx = 0
         self.count = 0
+        self.timer = QTimer(self)
+        self.timer.setInterval(450)
         self.timer.timeout.connect(self._animate)
         self._animate()
+        self.timer.start()
 
     def _animate(self):
-        self.count = (self.count + 1) % 4
-        self.label.setText("AI is typing" + "." * self.count)
+        self.count = (self.count + 1) % (len(self._dots) + 1)
+        if self.count == 0:
+            phrases = self._PHRASES_LUNA if self.luna else self._PHRASES_SIERRA
+            self._phrase_idx = (self._phrase_idx + 1) % len(phrases)
+            self.label.setText(phrases[self._phrase_idx])
+        active = "#7C8CF8" if self.luna else "#DA7756"
+        dim    = "rgba(124, 140, 248, 0.25)" if self.luna else "rgba(218, 119, 86, 0.25)"
+        for i, dot in enumerate(self._dots):
+            dot.setStyleSheet(
+                f"color: {active if i < self.count else dim}; font-size: 6px; background: transparent;"
+            )
+        if self.count == 1:
+            phrases = self._PHRASES_LUNA if self.luna else self._PHRASES_SIERRA
+            self.label.setText(phrases[self._phrase_idx])
 
     def stop(self):
         self.timer.stop()
@@ -1274,15 +1508,13 @@ class LocalAIApp(QMainWindow):
         "and conversational. Use Markdown only when it improves readability."
     )
     LUNA_SYSTEM_PROMPT = (
-        "You are Luna, an expert coding AI assistant. You specialise in writing clean, "
-        "efficient, production-ready code across all languages and frameworks. "
+        "You are Luna, an autonomous coding AI with direct workspace access. You write clean, "
+        "production-ready code that saves directly into the user's workspace files.\n"
         "Follow these rules strictly:\n"
-        "1. Always wrap code in fenced code blocks with the correct language tag.\n"
-        "2. Explain your code clearly but concisely — no fluff.\n"
-        "3. When debugging, identify the root cause before suggesting a fix.\n"
+        "1. Whenever writing or creating code, write it directly into workspace files using write_file.\n"
+        "2. Explain your code clearly and concisely.\n"
+        "3. When debugging, identify the root cause before fixing.\n"
         "4. Prefer idiomatic patterns and best practices for each language.\n"
-        "5. If a question is ambiguous, state your assumptions.\n"
-        "6. For large problems, break your answer into numbered steps.\n"
         "Be direct and technical. The user is a developer."
     )
 
@@ -1292,12 +1524,16 @@ class LocalAIApp(QMainWindow):
         if ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(ICON_PATH)))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        self.setMinimumSize(1260, 770)
-        self.resize(1536, 972)
+        self.setMinimumSize(1280, 780)
+        self.resize(1560, 980)
         self.conversation_history = []
         self.use_search = False
         self.use_luna = False
-        self._transition_progress = 0.0   # 0.0 = fully Sierra, 1.0 = fully Luna
+        self.auto_run = True
+        self.workspace = WorkspaceManager()
+        self.active_tool_cards = {}
+        self.agent_thread = None
+        self._transition_progress = 0.0
         self._transition_target = 0.0
         self.chat_thread = None
         self.thinking_widget = None
@@ -1306,7 +1542,6 @@ class LocalAIApp(QMainWindow):
         self._build()
         self._load_latest_chat()
         self.start_new_chat()
-        # Show What's New on first launch of this version
         QTimer.singleShot(400, self._maybe_show_whats_new)
 
     def _get_transition_progress(self):
@@ -1320,7 +1555,6 @@ class LocalAIApp(QMainWindow):
 
     def paintEvent(self, event):
         from PyQt5.QtGui import QPainter, QLinearGradient, QColor
-        import random
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
@@ -1332,176 +1566,376 @@ class LocalAIApp(QMainWindow):
             b = int(c1.blue()  + (c2.blue()  - c1.blue())  * t)
             return QColor(r, g, b)
 
-        # Sierra stops
-        s0 = QColor("#0A0906")
-        s1 = QColor("#1A1008")
-        s2 = QColor("#3A1E0A")
-        s3 = QColor("#6B3510")
-        # Luna stops
-        l0 = QColor("#000510")
-        l1 = QColor("#030D2A")
-        l2 = QColor("#071440")
-        l3 = QColor("#0A1A55")
+        # Sierra background: calm, rich, velvety charcoal with warmest undertone
+        s0 = QColor("#171614")
+        s1 = QColor("#131210")
+        # Luna background: deep architectural midnight slate
+        l0 = QColor("#0D1117")
+        l1 = QColor("#080B10")
 
-        grad = QLinearGradient(0, 0, w, h)
-        grad.setColorAt(0.0,  lerp_color(s0, l0, t))
-        grad.setColorAt(0.4,  lerp_color(s1, l1, t))
-        grad.setColorAt(0.75, lerp_color(s2, l2, t))
-        grad.setColorAt(1.0,  lerp_color(s3, l3, t))
+        grad = QLinearGradient(0, 0, 0, h)
+        grad.setColorAt(0.0, lerp_color(s0, l0, t))
+        grad.setColorAt(1.0, lerp_color(s1, l1, t))
         painter.fillRect(self.rect(), grad)
-
-        # Draw stars fading in as Luna takes over
-        if t > 0.0:
-            rng = random.Random(42)
-            alpha = int(180 * t)
-            painter.setPen(QColor(255, 255, 255, alpha))
-            for _ in range(120):
-                x = rng.randint(0, w)
-                y = rng.randint(0, h)
-                size = rng.choice([1, 1, 1, 2, 2, 3])
-                painter.drawEllipse(x, y, size, size)
-            painter.setPen(QColor(200, 220, 255, int(230 * t)))
-            for _ in range(20):
-                x = rng.randint(0, w)
-                y = rng.randint(0, h)
-                painter.drawText(x, y, "·")
-
         painter.end()
 
     def _stylesheet(self):
         if self.use_luna:
-            shell_bg   = "rgba(5, 10, 30, 0.88)"
-            shell_border = "rgba(80, 120, 220, 0.4)"
-            sidebar_bg = "#05091E"
-            sidebar_border = "#0F1A40"
-            title_bg   = "#060A20"
-            title_border = "#0F1A40"
-            panel_bg   = "#050818"
-            central_bg = "#040710"
-            composer_border_color = "#1E3080"
-            accent     = "#7090E0"
-            accent2    = "#A0B8F0"
-            wordmark_version = "#4A7AD8"
-            nav_checked = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0E2060,stop:1 #081440)"
-            nav_active  = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #142880,stop:1 #0A1A50)"
-            send_bg     = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3060D0,stop:1 #0A1A60)"
-            send_hover  = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4878E8,stop:1 #1428A0)"
-            scroll_handle = "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #2850C0,stop:1 #0A1850)"
-            model_card_bg = "#08102A"
-            model_card_border = "#1A2860"
-            avatar_ai   = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #204090,stop:1 #0A1850)"
-            avatar_user = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #152060,stop:1 #080E30)"
-            avatar_user_border = "#203080"
-            toggle_checked = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #2860E0,stop:1 #0A3090)"
-            action_card_bg = "#080E28"
-            action_card_border = "#1A2858"
-            action_icon_bg = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #0E1A40,stop:1 #060E28)"
-            composer_bg = "#060A20"
-            input_selection = "#1A3088"
-            luna_btn = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3A2860,stop:1 #251840)"
+            # ── Luna: Claude Code slate / indigo obsidian ─────────────────────
+            shell_bg          = "#0E121B"
+            shell_border      = "#1E2536"
+            sidebar_bg        = "#0A0D15"
+            sidebar_border    = "#19202E"
+            title_bg          = "#0E121B"
+            title_border      = "#19202E"
+            panel_bg          = "#0B0E17"
+            central_bg        = "#0D1118"
+            accent            = "#7C8CF8"
+            accent2           = "#9DAAFB"
+            wordmark_version  = "#7C8CF8"
+            nav_hover         = "#141A26"
+            nav_checked       = "#1A2234"
+            nav_active        = "#1A2234"
+            send_bg           = "#6366F1"
+            send_hover        = "#7579F6"
+            scroll_handle     = "rgba(124, 140, 248, 0.35)"
+            model_card_bg     = "#121724"
+            model_card_border = "#1F273D"
+            avatar_ai         = "#6366F1"
+            avatar_user       = "#162032"
+            avatar_user_bdr   = "#23314D"
+            toggle_checked    = "#6366F1"
+            action_card_bg    = "#121724"
+            action_card_bdr   = "#1F273D"
+            action_icon_bg    = "#182033"
+            composer_fill     = "#141A26"
+            input_selection   = "#2B3754"
+            luna_btn          = "#1E1B4B"
+            divider_col       = "#19202E"
+            brand_desc_col    = "#5E6E8C"
+            recent_hover      = "#141A26"
+            recent_icon_bg    = "#182033"
+            recent_name_col   = "#C8D3E6"
+            recent_age_col    = "#5E6E8C"
+            model_card_side   = "#121724"
+            model_card_side_b = "#1F273D"
+            chevron_col       = "#7C8CF8"
+            stat_key_col      = "#5E6E8C"
+            stat_val_col      = "#C8D3E6"
+            panel_heading_col = "#94A3B8"
+            feat_title_col    = "#C8D3E6"
+            feat_detail_col   = "#5E6E8C"
+            hero_title_col    = "#F1F5F9"
+            hero_sub_col      = "#94A3B8"
+            hero_desc_col     = "#64748B"
+            action_title_col  = "#F1F5F9"
+            action_sub_col    = "#64748B"
         else:
-            shell_bg   = "rgba(10, 8, 6, 0.82)"
-            shell_border = "rgba(180, 100, 40, 0.35)"
-            sidebar_bg = "#15120F"
-            sidebar_border = "#352C26"
-            title_bg   = "#151311"
-            title_border = "#352C26"
-            panel_bg   = "#12100E"
-            central_bg = "#0D0C0B"
-            composer_border_color = "#714A34"
-            accent     = "#D59A6E"
-            accent2    = "#C9A68B"
-            wordmark_version = "#D08C5C"
-            nav_checked = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4A2E1A,stop:1 #3E2010)"
-            nav_active  = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6B4020,stop:1 #4A2810)"
-            send_bg     = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #F09040,stop:1 #7A3010)"
-            send_hover  = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #FFB060,stop:1 #993820)"
-            scroll_handle = "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #C8773A,stop:1 #7A3E1A)"
-            model_card_bg = "#1A1512"
-            model_card_border = "#3C3028"
-            avatar_ai   = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #A86030,stop:1 #5A2E10)"
-            avatar_user = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3E2D22,stop:1 #241610)"
-            avatar_user_border = "#60432F"
-            toggle_checked = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #E08844,stop:1 #8C4418)"
-            action_card_bg = "#191512"
-            action_card_border = "#342A23"
-            action_icon_bg = "qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3A2418,stop:1 #251710)"
-            composer_bg = "#18130F"
-            input_selection = "#885334"
-            luna_btn = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3A2860,stop:1 #251840)"
+            # ── Sierra: Claude signature warm charcoal / terracotta ────────────
+            shell_bg          = "#1A1916"
+            shell_border      = "#2B2A25"
+            sidebar_bg        = "#151412"
+            sidebar_border    = "#24231E"
+            title_bg          = "#1A1916"
+            title_border      = "#24231E"
+            panel_bg          = "#161513"
+            central_bg        = "#191815"
+            accent            = "#DA7756"
+            accent2           = "#E58A6C"
+            wordmark_version  = "#DA7756"
+            nav_hover         = "#22201C"
+            nav_checked       = "#2A2722"
+            nav_active        = "rgba(218, 119, 86, 0.14)"
+            send_bg           = "#DA7756"
+            send_hover        = "#E58869"
+            scroll_handle     = "rgba(218, 119, 86, 0.35)"
+            model_card_bg     = "#201E1A"
+            model_card_border = "#2D2A24"
+            avatar_ai         = "#DA7756"
+            avatar_user       = "#2A2722"
+            avatar_user_bdr   = "#38342D"
+            toggle_checked    = "#DA7756"
+            action_card_bg    = "#201E1A"
+            action_card_bdr   = "#2D2A24"
+            action_icon_bg    = "#282520"
+            composer_fill     = "#22201C"
+            input_selection   = "#4A2B1E"
+            luna_btn          = "#28203A"
+            divider_col       = "#262420"
+            brand_desc_col    = "#8C877D"
+            recent_hover      = "#22201C"
+            recent_icon_bg    = "#262420"
+            recent_name_col   = "#D6D1C7"
+            recent_age_col    = "#7D796F"
+            model_card_side   = "#201E1A"
+            model_card_side_b = "#2D2A24"
+            chevron_col       = "#DA7756"
+            stat_key_col      = "#8C877D"
+            stat_val_col      = "#D6D1C7"
+            panel_heading_col = "#B5B0A4"
+            feat_title_col    = "#D6D1C7"
+            feat_detail_col   = "#7D796F"
+            hero_title_col    = "#FAF7F2"
+            hero_sub_col      = "#B5B0A4"
+            hero_desc_col     = "#858074"
+            action_title_col  = "#FAF7F2"
+            action_sub_col    = "#858074"
 
         return f"""
-            * {{ font-family: 'Segoe UI', Arial, sans-serif; }}
+            * {{
+                font-family: 'Segoe UI', 'Inter', -apple-system, Arial, sans-serif;
+                font-size: 14px;
+            }}
             QMainWindow {{ background: transparent; }}
-            QFrame#appShell {{ background: {shell_bg}; border: 1px solid {shell_border}; border-radius: 12px; }}
-            QFrame#titleBar {{ background: {title_bg}; border-bottom: 1px solid {title_border}; min-height: 58px; max-height: 58px; border-top-right-radius: 12px; }}
+
+            /* ── Shell ── */
+            QFrame#appShell {{
+                background: {shell_bg};
+                border: 1px solid {shell_border};
+                border-radius: 12px;
+            }}
+
+            /* ── Title bar ── */
+            QFrame#titleBar {{
+                background: {title_bg};
+                border-bottom: 1px solid {title_border};
+                min-height: 48px; max-height: 48px;
+                border-top-right-radius: 12px;
+            }}
             QFrame#windowControls {{ background: transparent; border: none; }}
-            QPushButton#trafficClose, QPushButton#trafficMinimize, QPushButton#trafficMaximize {{ border: none; border-radius: 0; color: #C0C0C0; font-size: 14px; font-weight: bold; }}
-            QPushButton#trafficClose {{ background: transparent; }} QPushButton#trafficMinimize {{ background: transparent; }} QPushButton#trafficMaximize {{ background: transparent; }}
-            QPushButton#trafficClose:hover {{ background: #E81123; color: white; }} QPushButton#trafficMinimize:hover {{ background: #4C4C4C; color: white; }} QPushButton#trafficMaximize:hover {{ background: #4C4C4C; color: white; }}
-            QLabel#titleIcon {{ color: {accent}; font-size: 21px; }}
-            QLabel#titleText {{ color: #F1E9E0; font-size: 16px; font-weight: 600; }}
-            QPushButton#topIconButton {{ color: {accent2}; background: transparent; border: none; font-size: 20px; min-width: 30px; }}
-            QPushButton#topIconButton:hover {{ color: #F3D1B3; }}
-            QFrame#sidebar {{ background: {sidebar_bg}; border: none; border-right: 1px solid {sidebar_border}; border-bottom-left-radius: 12px; }}
-            QLabel#wordmark {{ color: #F1E9E0; font-size: 23px; font-weight: 700; }}
-            QLabel#wordmark span, QLabel#heroTitle span {{ color: {wordmark_version}; }}
-            QLabel#brandDescription {{ color: #BDA792; font-size: 13px; }}
-            QPushButton#navButton, QPushButton#navButtonActive {{ color: #C4B7A9; background: transparent; border: none; border-radius: 12px; padding: 0 14px; text-align: left; font-size: 15px; }}
-            QPushButton#navButton:hover {{ background: #2A211B; color: #F1E4D8; }}
-            QPushButton#navButton:checked {{ background: {nav_checked}; color: #FFF9F3; }}
-            QPushButton#navButtonActive {{ background: {nav_active}; color: #FFF9F3; font-weight: 600; }}
+            QPushButton#trafficClose, QPushButton#trafficMinimize, QPushButton#trafficMaximize {{
+                border: none; border-radius: 0;
+                color: #6C685F; font-size: 12px; font-weight: 600;
+                background: transparent;
+            }}
+            QPushButton#trafficClose:hover   {{ background: rgba(220,50,50,0.80); color: #FFF; border-radius: 4px; }}
+            QPushButton#trafficMinimize:hover {{ background: rgba(255,200,0,0.25); color: #FFF; border-radius: 4px; }}
+            QPushButton#trafficMaximize:hover {{ background: rgba(255,255,255,0.08); color: #FFF; border-radius: 4px; }}
+            QLabel#titleIcon {{ color: {accent}; font-size: 15px; }}
+            QLabel#titleText {{ color: #A8A398; font-size: 13px; font-weight: 500; letter-spacing: 0.2px; }}
+            QPushButton#topIconButton {{
+                color: #7D796F; background: transparent;
+                border: none; font-size: 15px;
+                border-radius: 6px; min-width: 32px; min-height: 32px;
+            }}
+            QPushButton#topIconButton:hover {{
+                background: rgba(255,255,255,0.06);
+                color: {accent2};
+            }}
+
+            /* ── Sidebar ── */
+            QFrame#sidebar {{
+                background: {sidebar_bg};
+                border: none;
+                border-right: 1px solid {sidebar_border};
+                border-bottom-left-radius: 12px;
+            }}
+            QLabel#wordmark {{
+                color: #FAF7F2;
+                font-size: 18px; font-weight: 700;
+                letter-spacing: -0.4px;
+            }}
+            QLabel#wordmark span {{ color: {wordmark_version}; }}
+            QLabel#heroTitle span {{ color: {wordmark_version}; }}
+            QLabel#brandDescription {{ color: {brand_desc_col}; font-size: 11px; }}
+
+            QPushButton#navButton, QPushButton#navButtonActive {{
+                color: #9C978D;
+                background: transparent; border: none;
+                border-radius: 8px; padding: 0 12px;
+                text-align: left; font-size: 13px; min-height: 38px;
+            }}
+            QPushButton#navButton:hover {{ background: {nav_hover}; color: #ECE8E1; }}
+            QPushButton#navButton:checked {{ background: {nav_checked}; color: #ECE8E1; }}
+            QPushButton#navButtonActive {{
+                background: {nav_active}; color: #FAF7F2; font-weight: 600;
+                border: 1px solid {accent}40;
+            }}
             QPushButton#navButtonActive:hover {{ background: {nav_active}; }}
-            QPushButton#lunaButton {{ color: #A89BC2; background: transparent; border: none; border-radius: 12px; padding: 0 14px; text-align: left; font-size: 15px; min-height: 48px; }}
-            QPushButton#lunaButton:hover {{ background: #1E1A2A; color: #C8B8E8; }}
-            QPushButton#lunaButton:checked {{ background: {luna_btn}; color: #D4C0F0; font-weight: 600; }}
-            QFrame#sidebarDivider, QFrame#panelDivider {{ color: #3A302A; background: #3A302A; max-height: 1px; }}
-            QLabel#sectionHeading {{ color: #D3BDA9; font-size: 14px; font-weight: 500; padding: 0 0 7px 8px; }}
+            QPushButton#lunaButton {{
+                color: #9C978D; background: transparent; border: none;
+                border-radius: 8px; padding: 0 12px;
+                text-align: left; font-size: 13px; min-height: 38px;
+            }}
+            QPushButton#lunaButton:hover {{ background: #1A1828; color: #C4B5FD; }}
+            QPushButton#lunaButton:checked {{ background: {luna_btn}; color: #E0E7FF; font-weight: 600; }}
+
+            QFrame#sidebarDivider, QFrame#panelDivider {{
+                background: {divider_col}; max-height: 1px; border: none;
+            }}
+            QLabel#sectionHeading {{
+                color: {recent_age_col}; font-size: 11px;
+                font-weight: 700; letter-spacing: 0.8px;
+                padding: 0 0 4px 4px;
+            }}
             QFrame#recentChat {{ background: transparent; border-radius: 8px; }}
-            QFrame#recentChat:hover {{ background: #282019; }}
-            QLabel#recentIcon {{ color: #E0B187; background: #2A211B; border-radius: 8px; font-size: 15px; }}
-            QLabel#recentName {{ color: #D0C0B1; font-size: 14px; font-weight: 500; }} QLabel#recentAge {{ color: #9D8877; font-size: 12px; }}
-            QFrame#sidebarModelCard {{ background: #211914; border: 1px solid #503827; border-radius: 12px; }}
-            QLabel#sidebarModelTitle {{ color: #F1E9E0; font-size: 14px; font-weight: 600; }}
-            QLabel#sidebarModelSubtitle {{ color: #C1A78F; font-size: 11px; }} QLabel#onlineIndicator {{ color: #55D8A7; font-size: 11px; }}
-            QLabel#cardChevron {{ color: #D9AC85; font-size: 28px; font-weight: 200; }}
-            QScrollArea {{ background: transparent; border: none; }} QScrollBar:vertical {{ background: transparent; width: 8px; margin: 8px 1px; }}
-            QScrollBar::handle:vertical {{ background: {scroll_handle}; border-radius: 4px; min-height: 38px; }} QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QFrame#recentChat:hover {{ background: {recent_hover}; }}
+            QLabel#recentIcon {{
+                color: {accent}; background: {recent_icon_bg};
+                border-radius: 6px; font-size: 12px;
+            }}
+            QLabel#recentName {{
+                color: {recent_name_col}; font-size: 13px; font-weight: 500;
+            }}
+            QLabel#recentAge {{ color: {recent_age_col}; font-size: 11px; }}
+            QFrame#sidebarModelCard {{
+                background: {model_card_side};
+                border: 1px solid {model_card_side_b};
+                border-radius: 10px;
+            }}
+            QLabel#sidebarModelTitle {{ color: #D6D1C7; font-size: 13px; font-weight: 600; }}
+            QLabel#sidebarModelSubtitle {{ color: {stat_key_col}; font-size: 11px; }}
+            QLabel#onlineIndicator {{ color: #34D399; font-size: 10px; }}
+            QLabel#cardChevron {{ color: {chevron_col}; font-size: 20px; font-weight: 300; }}
+
+            /* ── Scrollbar ── */
+            QScrollArea {{ background: transparent; border: none; }}
+            QScrollBar:vertical {{
+                background: transparent; width: 6px; margin: 4px 1px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {scroll_handle}; border-radius: 3px; min-height: 32px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+
+            /* ── Central chat pane ── */
             QWidget#centralPane {{ background: {central_bg}; }}
-            QLabel#heroTitle {{ color: #F2EAE1; font-size: 51px; font-weight: 700; }}
-            QLabel#heroSubtitle {{ color: #D2B9A3; font-size: 20px; }} QLabel#heroDescription {{ color: #AA9788; font-size: 15px; }}
-            QPushButton#actionCard {{ background: {action_card_bg}; border: 1px solid {action_card_border}; border-radius: 12px; text-align: left; }}
-            QPushButton#actionCard:hover {{ background: #251B16; border-color: #754C34; }}
-            QLabel#actionIcon {{ background: {action_icon_bg}; color: #E2B189; border-radius: 12px; font-size: 17px; font-weight: 700; }}
-            QLabel#actionTitle {{ color: #F0E6DD; font-size: 14px; font-weight: 600; }} QLabel#actionSubtitle {{ color: #B7A18E; font-size: 12px; }}
-            QFrame#composer {{ background: transparent; border: none; border-radius: 12px; }}
-            QTextEdit#chatInput {{ color: #F0E8E0; background: transparent; border: none; padding: 12px 18px; font-size: 15px; selection-background-color: {input_selection}; }}
-            QTextEdit#chatInput:focus {{ border: none; }}
-            QPushButton#composerButton {{ color: #D0B89F; background: #2A211B; border: none; border-radius: 12px; padding: 0 13px; min-height: 39px; font-size: 13px; }}
-            QPushButton#composerButton:hover, QPushButton#composerButton:checked {{ color: #FFF7F0; background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #7A4828,stop:1 #4E2C14); }}
-            QPushButton#attachButton {{ color: #D0B89F; background: #2A211B; border: none; border-radius: 12px; min-height: 39px; min-width: 40px; max-width: 40px; font-size: 23px; }}
-            QPushButton#attachButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #7A4828,stop:1 #4E2C14); color: #FFF7F0; }}
-            QPushButton#sendButton {{ color: #FFF8F1; background: {send_bg}; border: none; border-radius: 12px; min-width: 40px; max-width: 40px; min-height: 40px; font-size: 21px; font-weight: 600; }}
-            QPushButton#sendButton:hover {{ background: {send_hover}; }} QPushButton#sendButton:disabled {{ background: #493127; color: #A58A78; }}
-            QFrame#modelPanel {{ background: {panel_bg}; border: none; border-left: 1px solid {sidebar_border}; border-bottom-right-radius: 12px; }}
-            QLabel#panelHeadingIcon, QLabel#featureSparkle {{ color: {accent}; font-size: 20px; }} QLabel#panelHeading {{ color: #E9DDD2; font-size: 17px; font-weight: 600; }}
-            QLabel#tuningIcon {{ color: {accent}; font-size: 20px; }} QFrame#modelCard, QFrame#darkModeCard {{ background: {model_card_bg}; border: 1px solid {model_card_border}; border-radius: 12px; }}
-            QLabel#modelName {{ color: #F0E8E0; font-size: 16px; font-weight: 600; }} QLabel#runningStatus {{ color: #50D5A3; font-size: 12px; }}
-            QLabel#modelDescription {{ color: #C6B09A; font-size: 13px; line-height: 1.5; }} QLabel#statKey {{ color: #C9B5A1; font-size: 13px; }} QLabel#statValue {{ color: #E0C5AC; font-size: 13px; }}
-            QLabel#featureIcon {{ color: {accent}; background: {action_icon_bg}; border-radius: 12px; font-size: 18px; }} QLabel#featureTitle {{ color: #E2D2C2; font-size: 13px; font-weight: 500; }} QLabel#featureDetail {{ color: #A9927F; font-size: 11px; }}
-            QCheckBox#darkToggle::indicator {{ width: 39px; height: 24px; border-radius: 12px; background: #4C3A2F; }} QCheckBox#darkToggle::indicator:checked {{ background: {toggle_checked}; }} QCheckBox#darkToggle::indicator:checked:hover {{ background: {send_hover}; }}
-            QLabel#assistantAvatar {{ color: #FFF4E9; background: {avatar_ai}; border-radius: 12px; font-size: 9px; font-weight: 800; }} QLabel#userAvatar {{ color: #EAD7C3; background: {avatar_user}; border: 1px solid {avatar_user_border}; border-radius: 12px; font-size: 8px; font-weight: 800; }}
-            QLabel#messageMeta {{ color: #AA9280; font-size: 10px; }}
+
+            /* ── Welcome screen ── */
+            QLabel#heroTitle {{
+                color: {hero_title_col};
+                font-size: 40px; font-weight: 700;
+                letter-spacing: -0.8px;
+            }}
+            QLabel#heroSubtitle {{ color: {hero_sub_col}; font-size: 17px; font-weight: 500; }}
+            QLabel#heroDescription {{ color: {hero_desc_col}; font-size: 13px; line-height: 1.5; }}
+
+            /* ── Action cards ── */
+            QPushButton#actionCard {{
+                background: {action_card_bg};
+                border: 1px solid {action_card_bdr};
+                border-radius: 12px; text-align: left;
+            }}
+            QPushButton#actionCard:hover {{
+                background: rgba(255,255,255,0.05);
+                border-color: {accent}60;
+            }}
+            QLabel#actionIcon {{
+                background: {action_icon_bg};
+                color: {accent};
+                border-radius: 8px;
+                font-size: 16px; font-weight: 700;
+            }}
+            QLabel#actionTitle {{ color: {action_title_col}; font-size: 13px; font-weight: 600; }}
+            QLabel#actionSubtitle {{ color: {action_sub_col}; font-size: 11px; }}
+
+            /* ── Composer ── */
+            QFrame#composer {{ background: transparent; border: none; border-radius: 18px; }}
+            QTextEdit#chatInput {{
+                color: #EDE8DF;
+                background: transparent; border: none;
+                padding: 10px 14px; font-size: 14px;
+                selection-background-color: {input_selection};
+            }}
+            QPushButton#composerButton {{
+                color: #9C978D;
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 8px; padding: 0 10px;
+                min-height: 32px; font-size: 12px; font-weight: 500;
+            }}
+            QPushButton#composerButton:hover, QPushButton#composerButton:checked {{
+                color: {accent2};
+                background: rgba(255,255,255,0.08);
+                border-color: {accent}55;
+            }}
+            QPushButton#attachButton {{
+                color: #9C978D;
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 8px;
+                min-height: 32px; min-width: 34px; max-width: 34px;
+                font-size: 17px;
+            }}
+            QPushButton#attachButton:hover {{
+                background: rgba(255,255,255,0.08);
+                color: {accent};
+            }}
+            QPushButton#sendButton {{
+                color: #FFFFFF;
+                background: {send_bg};
+                border: none; border-radius: 8px;
+                min-width: 34px; max-width: 34px; min-height: 34px;
+                font-size: 16px; font-weight: 700;
+            }}
+            QPushButton#sendButton:hover {{ background: {send_hover}; }}
+            QPushButton#sendButton:disabled {{
+                background: rgba(255,255,255,0.05);
+                color: rgba(255,255,255,0.20);
+            }}
+
+            /* ── Model Panel ── */
+            QFrame#modelPanel {{
+                background: {panel_bg};
+                border: none;
+                border-left: 1px solid {sidebar_border};
+                border-bottom-right-radius: 12px;
+            }}
+            QLabel#panelHeadingIcon {{ color: {accent}; font-size: 15px; }}
+            QLabel#panelHeading {{ color: {panel_heading_col}; font-size: 14px; font-weight: 600; }}
+            QLabel#tuningIcon {{ color: {accent}; font-size: 15px; }}
+            QFrame#modelCard, QFrame#darkModeCard {{
+                background: {model_card_bg};
+                border: 1px solid {model_card_border};
+                border-radius: 10px;
+            }}
+            QLabel#modelName {{ color: #D6D1C7; font-size: 13px; font-weight: 600; }}
+            QLabel#runningStatus {{ color: #34D399; font-size: 11px; }}
+            QLabel#modelDescription {{ color: {feat_detail_col}; font-size: 12px; line-height: 1.4; }}
+            QLabel#statKey {{ color: {stat_key_col}; font-size: 12px; }}
+            QLabel#statValue {{ color: {stat_val_col}; font-size: 12px; }}
+            QLabel#featureIcon {{ color: {accent}; background: {action_icon_bg}; border-radius: 8px; font-size: 15px; }}
+            QLabel#featureTitle {{ color: {feat_title_col}; font-size: 12px; font-weight: 500; }}
+            QLabel#featureDetail {{ color: {feat_detail_col}; font-size: 11px; }}
+            QCheckBox#darkToggle::indicator {{
+                width: 34px; height: 18px; border-radius: 9px;
+                background: rgba(255,255,255,0.08);
+            }}
+            QCheckBox#darkToggle::indicator:checked {{ background: {toggle_checked}; }}
+
+            /* ── Avatars ── */
+            QLabel#assistantAvatar {{
+                color: {accent};
+                background: rgba(218, 119, 86, 0.14);
+                border: 1px solid rgba(218, 119, 86, 0.28);
+                border-radius: 8px;
+                font-size: 16px; font-weight: bold;
+            }}
+            QLabel#userAvatar {{
+                color: #C2BEB5;
+                background: {avatar_user};
+                border: 1px solid {avatar_user_bdr};
+                border-radius: 8px;
+                font-size: 10px; font-weight: 700;
+                letter-spacing: 0.5px;
+            }}
+
+            /* ── Misc ── */
+            QLabel#messageMeta {{ color: {recent_age_col}; font-size: 10px; }}
             QTextEdit {{ border: none; }}
-            QFrame#thinkingWidget {{ background: transparent; border: none; }} QLabel#thinkingText {{ color: #D7C1AB; font-size: 13px; font-weight: 600; }}
-            QLabel#iconFallback {{ color: #E8C09B; background: {action_icon_bg}; border-radius: 12px; font-size: 18px; font-weight: 700; }}
+            QFrame#thinkingWidget {{ background: transparent; border: none; }}
+            QLabel#thinkingText {{ color: {accent}; font-size: 12px; font-weight: 600; }}
+            QLabel#iconFallback {{
+                color: {accent}; background: {action_icon_bg};
+                border-radius: 8px; font-size: 15px; font-weight: 700;
+            }}
         """
 
     def _build(self):
         outer = QWidget()
         outer.setStyleSheet("background: transparent;")
         outer_layout = QVBoxLayout(outer)
-        outer_layout.setContentsMargins(12, 18, 12, 18)
+        outer_layout.setContentsMargins(10, 14, 10, 14)
         self.setCentralWidget(outer)
 
         shell = QFrame()
@@ -1510,22 +1944,23 @@ class LocalAIApp(QMainWindow):
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
 
-        sidebar_column = QVBoxLayout()
-        sidebar_column.setContentsMargins(0, 0, 0, 0)
-        sidebar_column.setSpacing(0)
-        self.sidebar = Sidebar()
+        # Sidebar
+        self.sidebar = Sidebar(workspace=self.workspace)
         self.sidebar.new_chat_requested.connect(self.start_new_chat)
         self.sidebar.search_toggled.connect(self.set_search)
         self.sidebar.luna_toggled.connect(self.set_luna)
         self.sidebar.chat_loaded.connect(self.load_chat)
-        sidebar_column.addWidget(self.sidebar, 1)
-        shell_layout.addLayout(sidebar_column)
+        if hasattr(self.sidebar, 'file_tree'):
+            self.sidebar.file_tree.file_selected.connect(self._on_file_selected_from_tree)
+        shell_layout.addWidget(self.sidebar)
 
+        # Center column: title bar + chat
         workspace_column = QVBoxLayout()
         workspace_column.setContentsMargins(0, 0, 0, 0)
         workspace_column.setSpacing(0)
         self.title_bar = TitleBar()
         workspace_column.addWidget(self.title_bar)
+
         lower = QHBoxLayout()
         lower.setContentsMargins(0, 0, 0, 0)
         lower.setSpacing(0)
@@ -1542,14 +1977,23 @@ class LocalAIApp(QMainWindow):
         layout = QVBoxLayout(pane)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # Workspace bar (only shown in Luna mode)
+        self.workspace_bar = WorkspaceBar(self.workspace, luna=self.use_luna)
+        self.workspace_bar.folder_change_requested.connect(self._choose_workspace_folder)
+        self.workspace_bar.auto_run_toggled.connect(self._set_auto_run)
+        self.workspace_bar.refresh_requested.connect(self._refresh_workspace)
+        layout.addWidget(self.workspace_bar)
+
+        # Message scroll area
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.message_host = QWidget()
         self.message_host.setStyleSheet("background: transparent;")
         self.message_layout = QVBoxLayout(self.message_host)
-        self.message_layout.setContentsMargins(60, 40, 60, 40)
-        self.message_layout.setSpacing(28)
+        self.message_layout.setContentsMargins(64, 28, 64, 28)
+        self.message_layout.setSpacing(24)
         self.message_layout.setAlignment(Qt.AlignTop)
         self.scroll.setWidget(self.message_host)
         layout.addWidget(self.scroll, 1)
@@ -1560,15 +2004,16 @@ class LocalAIApp(QMainWindow):
         holder = QWidget()
         holder.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(holder)
-        layout.setContentsMargins(20, 0, 20, 28)
+        layout.setContentsMargins(48, 0, 48, 20)
         layout.setSpacing(0)
+
         composer = GradientFrame()
         composer.setObjectName("composer")
         composer_layout = QVBoxLayout(composer)
-        composer_layout.setContentsMargins(20, 14, 20, 14)
-        composer_layout.setSpacing(9)
+        composer_layout.setContentsMargins(16, 10, 16, 10)
+        composer_layout.setSpacing(8)
 
-        # Attachment indicator row (hidden until a file is attached)
+        # Attachment chip row (hidden until file is attached)
         self.attach_row = QWidget()
         self.attach_row.setStyleSheet("background: transparent;")
         attach_row_layout = QHBoxLayout(self.attach_row)
@@ -1577,15 +2022,16 @@ class LocalAIApp(QMainWindow):
         self.attach_label = QLabel()
         self.attach_label.setObjectName("attachLabel")
         self.attach_label.setStyleSheet(
-            "QLabel { color: #E8B97A; background: #3A2510; border: 1px solid #6B4428; "
-            "border-radius: 8px; padding: 4px 10px; font-size: 12px; }"
+            "QLabel { color: #D6D1C7; background: rgba(255,255,255,0.06); "
+            "border: 1px solid rgba(255,255,255,0.10); border-radius: 6px; "
+            "padding: 3px 10px; font-size: 11px; font-weight: 500; }"
         )
         remove_attach = QPushButton("✕")
-        remove_attach.setFixedSize(22, 22)
+        remove_attach.setFixedSize(18, 18)
         remove_attach.setStyleSheet(
-            "QPushButton { color: #E8B97A; background: #3A2510; border: 1px solid #6B4428; "
-            "border-radius: 6px; font-size: 11px; }"
-            "QPushButton:hover { background: #6B2010; color: white; }"
+            "QPushButton { color: #9C978D; background: rgba(255,255,255,0.04); "
+            "border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; font-size: 10px; }"
+            "QPushButton:hover { background: rgba(220,50,50,0.70); color: white; }"
         )
         remove_attach.clicked.connect(self._clear_attachment)
         attach_row_layout.addWidget(self.attach_label)
@@ -1594,71 +2040,86 @@ class LocalAIApp(QMainWindow):
         self.attach_row.setVisible(False)
         composer_layout.addWidget(self.attach_row)
 
+        # Input field
         self.chat_input = ChatInput()
         self.chat_input.setObjectName("chatInput")
-        self.chat_input.setPlaceholderText(f"Message {APP_NAME}…")
-        self.chat_input.setMinimumHeight(44)
+        self.chat_input.setPlaceholderText("Message Sierra…")
+        self.chat_input.setMinimumHeight(42)
         self.chat_input.setMaximumHeight(200)
         self.chat_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.chat_input.document().contentsChanged.connect(self._resize_input)
         self.chat_input.submitted.connect(self.send_message)
         composer_layout.addWidget(self.chat_input)
+
+        # Bottom action row
         actions = QHBoxLayout()
-        actions.setSpacing(8)
-        attach = QPushButton("+")
-        attach.setObjectName("attachButton")
-        attach.setToolTip("Attach a file")
-        attach.clicked.connect(self._attach_file)
-        actions.addWidget(attach)
+        actions.setSpacing(6)
+
+        # Attach
+        attach_btn = QPushButton("⊕")
+        attach_btn.setObjectName("attachButton")
+        attach_btn.setToolTip("Attach a file")
+        attach_btn.setCursor(Qt.PointingHandCursor)
+        attach_btn.clicked.connect(self._attach_file)
+        actions.addWidget(attach_btn)
 
         # Model switcher
         from PyQt5.QtWidgets import QMenu, QWidgetAction
-        self.model_button = QPushButton("⬡  Sierra")
+        self.model_button = QPushButton("◈  Sierra")
         self.model_button.setObjectName("composerButton")
         self.model_button.setToolTip("Switch AI model")
         self.model_button.setCursor(Qt.PointingHandCursor)
         model_menu = QMenu(self.model_button)
-
-        # Sierra item
-        sierra_action = model_menu.addAction("⬡  Sierra  (Llama 3 8B)")
+        sierra_action = model_menu.addAction("◈  Sierra   (Llama 3 · 8B)")
         sierra_action.triggered.connect(lambda: self._switch_model("sierra"))
-
-        # Luna item — dark blue with stars as a custom widget
-        luna_widget = QLabel("✦ · Luna  (Qwen 2.5 Coder 14B) · ✦")
+        luna_widget = QLabel("✦  Luna   (Qwen 2.5 Coder · 14B)")
         luna_widget.setStyleSheet(
-            "QLabel { background: #080E2E; color: #C8D8FF; font-size: 13px; "
-            "padding: 8px 18px; border-radius: 6px; border: 1px solid #1E3080; }"
+            "QLabel { background: #182030; color: #C8D3E6; font-size: 12px; "
+            "padding: 8px 16px; border-radius: 6px; border: 1px solid #253048; }"
         )
         luna_widget.setCursor(Qt.PointingHandCursor)
         luna_wa = QWidgetAction(model_menu)
         luna_wa.setDefaultWidget(luna_widget)
         luna_widget.mousePressEvent = lambda e: self._luna_menu_click(model_menu)
         model_menu.addAction(luna_wa)
-
         model_menu.setStyleSheet("""
-            QMenu { background: #1A1410; border: 1px solid #6B4428; border-radius: 8px; padding: 4px; font-size: 13px; }
-            QMenu::item { padding: 8px 18px; border-radius: 6px; color: #E8B97A; }
-            QMenu::item:selected { background: #4A2E18; color: #FFD580; }
+            QMenu {
+                background: #1F1D19; border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 8px; padding: 4px;
+            }
+            QMenu::item { padding: 6px 14px; border-radius: 6px; color: #D6D1C7; font-size: 12px; }
+            QMenu::item:selected { background: rgba(255,255,255,0.06); color: #FAF7F2; }
         """)
         self.model_button.setMenu(model_menu)
         actions.addWidget(self.model_button)
 
-        self.search_button = QPushButton("◎  Search")
+        # Web search
+        self.search_button = QPushButton("⌕  Search")
         self.search_button.setObjectName("composerButton")
         self.search_button.setCheckable(True)
+        self.search_button.setToolTip("Toggle web search")
+        self.search_button.setCursor(Qt.PointingHandCursor)
         self.search_button.toggled.connect(self._composer_search_toggled)
         actions.addWidget(self.search_button)
-        code = QPushButton("</>  Code")
-        code.setObjectName("composerButton")
-        code.clicked.connect(self._start_code_prompt)
-        actions.addWidget(code)
+
+        # Code prompt
+        code_btn = QPushButton("✦  Code")
+        code_btn.setObjectName("composerButton")
+        code_btn.setToolTip("Start a code task")
+        code_btn.setCursor(Qt.PointingHandCursor)
+        code_btn.clicked.connect(self._start_code_prompt)
+        actions.addWidget(code_btn)
+
         actions.addStretch()
+
+        # Send
         self.send_button = QPushButton("↑")
         self.send_button.setObjectName("sendButton")
         self.send_button.setCursor(Qt.PointingHandCursor)
-        self.send_button.setToolTip("Send message")
+        self.send_button.setToolTip("Send  (Enter)")
         self.send_button.clicked.connect(self.send_message)
         actions.addWidget(self.send_button)
+
         composer_layout.addLayout(actions)
         layout.addWidget(composer)
         return holder
@@ -1730,7 +2191,7 @@ class LocalAIApp(QMainWindow):
             print(f"Error loading chat: {e}")
 
     def start_new_chat(self):
-        if self.chat_thread and self.chat_thread.isRunning():
+        if (self.chat_thread and self.chat_thread.isRunning()) or (self.agent_thread and self.agent_thread.isRunning()):
             return
         while self.message_layout.count():
             item = self.message_layout.takeAt(0)
@@ -1738,6 +2199,7 @@ class LocalAIApp(QMainWindow):
                 item.widget().deleteLater()
         self.conversation_history = [SystemMessage(content=self.LUNA_SYSTEM_PROMPT if self.use_luna else self.SYSTEM_PROMPT)]
         self.thinking_widget = None
+        self.active_tool_cards.clear()
         # Reset session filename so this new chat gets its own file on close
         if hasattr(self, '_session_filename'):
             del self._session_filename
@@ -1860,6 +2322,9 @@ class LocalAIApp(QMainWindow):
         self.sidebar.update_branding(luna=self.use_luna)
         # Update model panel branding
         self.model_panel.update_branding(luna=self.use_luna)
+        # Update workspace bar styling
+        if hasattr(self, 'workspace_bar'):
+            self.workspace_bar.set_luna_mode(self.use_luna)
         # Refresh welcome screen if it's currently showing
         if hasattr(self, 'welcome'):
             try:
@@ -1875,9 +2340,14 @@ class LocalAIApp(QMainWindow):
                     item.widget().deleteLater()
             self._show_welcome()
         # Update chat input placeholder
-        self.chat_input.setPlaceholderText("Message Luna…" if self.use_luna else f"Message {APP_NAME}…")
+        self.chat_input.setPlaceholderText("Ask Luna to code, run commands, or explore workspace…" if self.use_luna else f"Message {APP_NAME}…")
 
     def send_message(self):
+        # If agent is running and button is clicked, cancel execution
+        if hasattr(self, 'agent_thread') and self.agent_thread and self.agent_thread.isRunning():
+            self.agent_thread.cancel()
+            return
+
         text = self.chat_input.toPlainText().strip()
         if not text and not self._attached_file:
             return
@@ -1917,24 +2387,124 @@ class LocalAIApp(QMainWindow):
         self._add_message(display_text, is_user=True)
         self.chat_input.clear()
         self.chat_input.setFixedHeight(44)
-        self.chat_input.setReadOnly(True)
-        self.send_button.setEnabled(False)
-        self._add_thinking()
-        temperature = self.model_panel.temp_slider.value() / 100
-        active_model = LUNA_MODEL_NAME if self.use_luna else MODEL_NAME
-        self.chat_thread = ChatThread(self.conversation_history, self.use_search, stream=True, temperature=temperature, model=active_model)
-        self.chat_thread.response_ready.connect(self.display_response)
-        self.chat_thread.stream_chunk.connect(self.stream_response)
-        self.chat_thread.error.connect(self.show_error)
-        self.chat_thread.start()
+
+        if self.use_luna:
+            # === LUNA AUTONOMOUS AGENT MODE ===
+            self.chat_input.setReadOnly(True)
+            self._set_stop_button(True)
+            self._add_thinking()
+
+            temperature = self.model_panel.temp_slider.value() / 100
+            self.agent_thread = AgentThread(
+                messages=self.conversation_history,
+                workspace=self.workspace,
+                model=LUNA_MODEL_NAME,
+                temperature=temperature,
+                auto_run=self.auto_run,
+                max_steps=25
+            )
+            self.agent_thread.stream_chunk.connect(self._on_agent_stream_chunk)
+            self.agent_thread.tool_started.connect(self._on_tool_started)
+            self.agent_thread.tool_needs_approval.connect(self._on_tool_needs_approval)
+            self.agent_thread.tool_finished.connect(self._on_tool_finished)
+            self.agent_thread.agent_status.connect(self._on_agent_status)
+            self.agent_thread.agent_finished.connect(self._on_agent_finished)
+            self.agent_thread.error.connect(self.show_error)
+            self.agent_thread.start()
+        else:
+            # === SIERRA CONVERSATIONAL MODE ===
+            self.chat_input.setReadOnly(True)
+            self.send_button.setEnabled(False)
+            self._add_thinking()
+            temperature = self.model_panel.temp_slider.value() / 100
+            self.chat_thread = ChatThread(
+                self.conversation_history,
+                self.use_search,
+                stream=True,
+                temperature=temperature,
+                model=MODEL_NAME
+            )
+            self.chat_thread.response_ready.connect(self.display_response)
+            self.chat_thread.stream_chunk.connect(self.stream_response)
+            self.chat_thread.error.connect(self.show_error)
+            self.chat_thread.start()
 
     def _add_message(self, text, is_user):
         message = MessageWidget(text, is_user, luna=self.use_luna)
+        if not is_user:
+            message.regenerate_requested.connect(self._regenerate_message)
         self.message_layout.addWidget(message)
         QTimer.singleShot(0, self._scroll_to_bottom)
 
+    def _regenerate_message(self, msg_widget):
+        """Remove the AI message widget and re-send the last user prompt."""
+        if (self.chat_thread and self.chat_thread.isRunning()) or \
+           (self.agent_thread and self.agent_thread.isRunning()):
+            return  # busy
+
+        # Remove the AI message from layout + history
+        msg_widget.setParent(None)
+        msg_widget.deleteLater()
+
+        # Pop the last AI message from history
+        for i in range(len(self.conversation_history) - 1, -1, -1):
+            from langchain_core.messages import AIMessage as _AI
+            if isinstance(self.conversation_history[i], _AI):
+                self.conversation_history.pop(i)
+                break
+
+        # Find the last user message to re-send
+        last_user_text = ""
+        for msg in reversed(self.conversation_history):
+            from langchain_core.messages import HumanMessage as _HM
+            if isinstance(msg, _HM):
+                last_user_text = msg.content
+                break
+
+        if not last_user_text:
+            return
+
+        # Re-run via thinking widget + model
+        if self.use_luna:
+            self.chat_input.setReadOnly(True)
+            self._set_stop_button(True)
+            self._add_thinking()
+            temperature = self.model_panel.temp_slider.value() / 100
+            self.agent_thread = AgentThread(
+                messages=self.conversation_history,
+                workspace=self.workspace,
+                model=LUNA_MODEL_NAME,
+                temperature=temperature,
+                auto_run=self.auto_run,
+                max_steps=25,
+            )
+            self.agent_thread.stream_chunk.connect(self._on_agent_stream_chunk)
+            self.agent_thread.tool_started.connect(self._on_tool_started)
+            self.agent_thread.tool_needs_approval.connect(self._on_tool_needs_approval)
+            self.agent_thread.tool_finished.connect(self._on_tool_finished)
+            self.agent_thread.agent_status.connect(self._on_agent_status)
+            self.agent_thread.agent_finished.connect(self._on_agent_finished)
+            self.agent_thread.error.connect(self.show_error)
+            self.agent_thread.start()
+        else:
+            self.chat_input.setReadOnly(True)
+            self.send_button.setEnabled(False)
+            self._add_thinking()
+            temperature = self.model_panel.temp_slider.value() / 100
+            self.chat_thread = ChatThread(
+                self.conversation_history,
+                self.use_search,
+                stream=True,
+                temperature=temperature,
+                model=MODEL_NAME,
+            )
+            self.chat_thread.response_ready.connect(self.display_response)
+            self.chat_thread.stream_chunk.connect(self.stream_response)
+            self.chat_thread.error.connect(self.show_error)
+            self.chat_thread.start()
+
     def _add_thinking(self):
-        self.thinking_widget = ThinkingWidget()
+        self.thinking_widget = ThinkingWidget(luna=self.use_luna)
         self.thinking_row = QWidget()
         self.thinking_row.setStyleSheet("background: transparent;")
         row_layout = QHBoxLayout(self.thinking_row)
@@ -1943,8 +2513,7 @@ class LocalAIApp(QMainWindow):
         row_layout.addStretch()
         self.message_layout.addWidget(self.thinking_row)
         QTimer.singleShot(0, self._scroll_to_bottom)
-        # Start typing animation immediately
-        self.thinking_widget.timer.start(200)  # Faster animation for typing
+        self.thinking_widget.timer.start(250)
 
     def _remove_thinking(self):
         if self.thinking_widget:
@@ -1989,6 +2558,142 @@ class LocalAIApp(QMainWindow):
             self.current_ai_widget.set_text(self.current_ai_message)
             self.last_update_time = current_time
             QTimer.singleShot(0, self._scroll_to_bottom)
+
+    def _set_stop_button(self, is_running: bool):
+        if is_running:
+            self.send_button.setText("◼")
+            self.send_button.setToolTip("Stop agent execution")
+            self.send_button.setStyleSheet(
+                "QPushButton { background: #D32F2F; color: white; border: none; "
+                "border-radius: 12px; min-width: 40px; max-width: 40px; min-height: 40px; "
+                "font-size: 16px; font-weight: bold; } QPushButton:hover { background: #B71C1C; }"
+            )
+            self.send_button.setEnabled(True)
+        else:
+            self.send_button.setText("↑")
+            self.send_button.setToolTip("Send message")
+            self.setStyleSheet(self._stylesheet())
+
+    def _choose_workspace_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Workspace Folder", str(self.workspace.root))
+        if folder:
+            self.workspace.set_root(folder)
+            self.workspace_bar.update_workspace()
+            if hasattr(self.sidebar, 'file_tree'):
+                self.sidebar.file_tree.workspace = self.workspace
+                self.sidebar.file_tree.refresh_tree()
+
+    def _set_auto_run(self, enabled: bool):
+        self.auto_run = enabled
+
+    def _refresh_workspace(self):
+        self.workspace_bar.update_workspace()
+        if hasattr(self.sidebar, 'file_tree'):
+            self.sidebar.file_tree.refresh_tree()
+
+    def _on_file_selected_from_tree(self, rel_path: str):
+        curr = self.chat_input.toPlainText()
+        if not curr.strip():
+            self.chat_input.setPlainText(f"Inspect and work on {rel_path}: ")
+        else:
+            self.chat_input.setPlainText(f"{curr} {rel_path}")
+        self.chat_input.setFocus()
+
+    def _on_agent_status(self, status_msg: str):
+        if self.thinking_widget:
+            for lbl in self.thinking_widget.findChildren(QLabel):
+                if lbl.objectName() == "thinkingText":
+                    lbl.setText(status_msg)
+                    break
+
+    def _on_agent_stream_chunk(self, chunk: str):
+        """Handle a streaming text chunk from the agent's current response step."""
+        self._remove_thinking()
+        if not hasattr(self, 'current_ai_message'):
+            self.current_ai_message = ""
+            self.current_ai_widget = MessageWidget("", is_user=False, luna=self.use_luna)
+            self.message_layout.addWidget(self.current_ai_widget)
+            self.last_update_time = 0
+
+        self.current_ai_message += chunk
+        current_time = time.time()
+        if not hasattr(self, 'last_update_time'):
+            self.last_update_time = 0
+        if current_time - self.last_update_time >= 0.08:
+            self.current_ai_widget.set_text(self.current_ai_message)
+            self.last_update_time = current_time
+            QTimer.singleShot(0, self._scroll_to_bottom)
+
+    def _on_tool_started(self, tool_name: str, args: dict, call_id: str):
+        """When a tool starts, finalize any partial streamed text and show the tool card."""
+        self._remove_thinking()
+        # If there was a streaming AI message in progress, finalize it as its own bubble
+        if hasattr(self, 'current_ai_message') and self.current_ai_message.strip():
+            self.current_ai_widget.set_text(self.current_ai_message)
+        if hasattr(self, 'current_ai_message'):
+            del self.current_ai_message
+        if hasattr(self, 'current_ai_widget'):
+            del self.current_ai_widget
+
+        card = ToolCardWidget(tool_name, args, call_id, luna=self.use_luna)
+        card.set_running()
+        self.active_tool_cards[call_id] = card
+        self.message_layout.addWidget(card)
+        QTimer.singleShot(0, self._scroll_to_bottom)
+
+    def _on_tool_needs_approval(self, tool_name: str, args: dict, call_id: str):
+        """When a tool needs approval, finalize any partial streamed text and show the approval card."""
+        self._remove_thinking()
+        if hasattr(self, 'current_ai_message') and self.current_ai_message.strip():
+            self.current_ai_widget.set_text(self.current_ai_message)
+        if hasattr(self, 'current_ai_message'):
+            del self.current_ai_message
+        if hasattr(self, 'current_ai_widget'):
+            del self.current_ai_widget
+
+        card = ToolCardWidget(tool_name, args, call_id, luna=self.use_luna)
+        card.set_needs_approval()
+        card.approved.connect(lambda cid: self.agent_thread.approve_tool(cid) if self.agent_thread else None)
+        card.rejected.connect(lambda cid: self.agent_thread.reject_tool(cid) if self.agent_thread else None)
+        self.active_tool_cards[call_id] = card
+        self.message_layout.addWidget(card)
+        QTimer.singleShot(0, self._scroll_to_bottom)
+
+    def _on_tool_finished(self, tool_name: str, args: dict, output_str: str, success: bool, call_id: str, extra_meta: dict):
+        """Update the tool card when the tool execution completes. Refresh file tree if a file was written."""
+        card = self.active_tool_cards.get(call_id)
+        if card:
+            card.set_finished(output_str, success)
+        # Refresh workspace file tree whenever files/dirs are modified
+        if tool_name in (
+            "write_file", "edit_file", "patch_file", "append_file", "scaffold_project",
+            "delete_file", "rename_file", "create_dir", "undo_last_edit"
+        ) and success:
+            if hasattr(self.sidebar, 'file_tree'):
+                self.sidebar.file_tree.refresh_tree()
+        QTimer.singleShot(0, self._scroll_to_bottom)
+
+    def _on_agent_finished(self, final_response: str):
+        """Called when the agent loop finishes — finalize any remaining streamed message."""
+        self._remove_thinking()
+        # Finalize any in-progress streamed bubble
+        if hasattr(self, 'current_ai_message') and self.current_ai_message.strip():
+            self.current_ai_widget.set_text(self.current_ai_message)
+            # Only add to history if AgentThread hasn't already done so
+            # (AgentThread appends AIMessage after each step, so we skip double-appending)
+        if hasattr(self, 'current_ai_message'):
+            del self.current_ai_message
+        if hasattr(self, 'current_ai_widget'):
+            del self.current_ai_widget
+
+        self._set_stop_button(False)
+        self.chat_input.setReadOnly(False)
+        self.chat_input.setFocus()
+        self._auto_save()
+        self.sidebar.refresh_recent_chats()
+        if hasattr(self.sidebar, 'file_tree'):
+            self.sidebar.file_tree.refresh_tree()
+        QTimer.singleShot(0, self._scroll_to_bottom)
 
     def _auto_save(self, also_save_named=False):
         """Auto-save current conversation. Optionally also write a named timestamped file."""
@@ -2119,9 +2824,11 @@ class LocalAIApp(QMainWindow):
 
     def show_error(self, error):
         self._remove_thinking()
+        self._set_stop_button(False)
+        active_model = LUNA_MODEL_NAME if self.use_luna else MODEL_NAME
         self._add_message(
             f"I couldn't reach the local model. Make sure Ollama is running and the "
-            f"'{MODEL_NAME}' model is installed.\n\nDetails: {error}",
+            f"'{active_model}' model is installed.\n\nDetails: {error}",
             is_user=False,
         )
         self._ready()

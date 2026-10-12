@@ -6,17 +6,27 @@
 
 ---
 
-## ✨ Features
+## ✨ Features (v1.2.0 Massive Overhaul)
 
-- 🤖 **Local AI** — Powered by Llama 3 via Ollama, runs fully on-device
-- ⚡ **Streaming Responses** — Text appears as it generates, word by word
-- 📎 **File Attachments** — Attach Word docs, PDFs, code files, CSVs and more — the AI reads them
-- 💾 **Auto-Save** — Conversations save automatically on close and appear in Recent Chats
-- 🌐 **Web Search** — Optional DuckDuckGo integration for up-to-date answers
-- 🎨 **Desert Theme** — Warm amber gradient UI with dark tones
-- 🖥️ **GPU Accelerated** — Optimized for NVIDIA GPUs (RTX 4070 SUPER tested)
-- 💬 **Markdown Rendering** — Bold, italics, code blocks, tables all render properly
-- 🕓 **Recent Chats** — Sidebar shows your last 5 conversations
+- 🤖 **Local AI & Dual Modes** — Switch seamlessly between **Sierra** (conversational research assistant) and **Luna** (autonomous coding engineer)
+- 🚀 **Luna Autonomous Coding Agent** — Claude- & Cursor-level agent that inspects, creates, surgically edits, tests, and validates code directly inside your workspace
+- 🛠️ **18 Autonomous Coding Tools**:
+  - `write_file`, `edit_file`, `patch_file`, `append_file`: Targeted surgical & block-based code writing
+  - `read_file`, `list_dir`, `get_file_info`: Deep workspace exploration and metadata inspection
+  - `create_dir`, `rename_file`, `delete_file`: Full file & directory lifecycle management
+  - `search_code`, `grep`: Literal and regex-based codebase search with glob filters
+  - `check_syntax`: Pre-flight AST validation for Python, JS/TS, HTML, CSS, and JSON
+  - `get_file_outline`: Fast structural symbol outline (classes, functions, IDs) for navigating large files
+  - `undo_last_edit`: Instant rollback to the previous snapshot if an edit or test fails
+  - `run_command`: PowerShell execution with real-time output and timeout protection
+  - `scaffold_project`, `open_browser`: Instant template generator and live browser preview
+- 📁 **Active Workspace Management** — Select any local folder; includes a live workspace file explorer in the sidebar that auto-syncs with disk changes
+- 🛡️ **Interactive Safety & Auto-Run** — Toggle between **⚡ Auto-Run: ON** (full autonomous speed) and **⏸ Auto-Run: OFF** (interactive approval cards with diff previews)
+- 💬 **Claude-Style Message Action Bar** — One-click **Copy Response** to markdown and **Regenerate** to easily iterate on AI outputs
+- ⚡ **Streaming Responses** — Low-latency streaming with live markdown rendering and syntax highlighting
+- 📎 **File Attachments** — Attach Word docs, PDFs, code files, CSVs, and more
+- 💾 **Auto-Save & History** — Conversations auto-save locally with quick access in Recent Chats
+- 🎨 **Dual Themes** — Warm Sierra desert amber & deep Luna starfield navy with smooth animated transitions
 
 ---
 
@@ -103,15 +113,20 @@ All styling lives in the `_stylesheet()` method and the `paintEvent` of `LocalAI
 
 ```
 vanta-ai/
-├── main.py              # Entire application
+├── main.py              # Main application window, theme engine, and chat interface
+├── agent.py             # Luna autonomous agent execution loop and tool dispatch
+├── agent_ui.py          # Glowing tool cards, workspace bar, and file tree widgets
+├── workspace.py         # File manager: surgical editing, syntax checking, undo stack
+├── Modelfile.luna       # Custom Ollama model definition for Luna 1.1
 ├── requirements.txt     # Python dependencies
 ├── run.bat              # Windows one-click launcher
+├── CHANGELOG.md         # Full release history and notes
 ├── assets/
 │   ├── sierra-desert-icon.png
 │   ├── screenshot-welcome.png
 │   ├── screenshot-chat.png
 │   └── screenshot-attachment.png
-└── .sierra/             # Auto-created user data (chats stored here)
+└── .sierra/             # Local workspace configuration and chat storage
 ```
 
 ---
