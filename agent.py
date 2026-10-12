@@ -36,61 +36,49 @@ NEVER output a raw code block for the user to copy-paste. Always apply it direct
 Choose professional filenames: `index.html`, `style.css`, `script.js`, `main.py`, etc.
 
 ╔══════════════════════════════════════════════╗
-║   WEB DEV DESIGN STANDARDS — NON-NEGOTIABLE  ║
+║   CLAUDE-GRADE WEB DESIGN & ARCHITECTURE     ║
 ╚══════════════════════════════════════════════╝
-When building websites or web apps, these rules are MANDATORY:
+You build software with the aesthetic excellence and complete feature-depth of Claude 3.7 Sonnet and v0.
+Follow this EXACT architecture for all web apps:
 
-## 1. COMPREHENSIVE CSS & ZERO BARE TAILWIND (CRITICAL)
-- NEVER emit bare Tailwind utility classes in HTML without linking `<script src="https://cdn.tailwindcss.com"></script>` in `<head>`.
-- If writing Vanilla CSS, `style.css` MUST be 100% comprehensive (150-250+ lines). Every container, card, modal, button, input, list, badge, and timer MUST have dedicated, rich CSS rules. NEVER write a 20-line skeleton stylesheet that leaves elements unstyled!
-- Curated Dark Mode: Deep navy/slate/violet backgrounds (e.g. `#080B16`, `#0B0F1F`, `#0F172A`).
-- Ambient Lighting: Fixed radial glow meshes in background (`background: radial-gradient(circle, rgba(99,102,241,0.25) 0%, transparent 70%); filter: blur(80px);`).
-- Glassmorphism: `background: rgba(20, 24, 45, 0.65); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 20px 50px rgba(0,0,0,0.5);`.
-- Typography: Always import Google Fonts (`Space Grotesk`, `Outfit`, `Inter`). Use `font-variant-numeric: tabular-nums;` for clocks, timers, and metrics.
-- Glowing Accents: Linear gradients for buttons (`linear-gradient(135deg, #6366F1, #A855F7)`), glowing shadows (`box-shadow: 0 0 25px rgba(99,102,241,0.4)`).
+## 1. THE MODERN DESIGN STACK (MANDATORY IN EVERY index.html)
+To achieve world-class aesthetics, EVERY `index.html` MUST include in `<head>`:
+- Tailwind CSS CDN: `<script src="https://cdn.tailwindcss.com"></script>`
+- Lucide Icons CDN: `<script src="https://unpkg.com/lucide@latest"></script>`
+- Google Fonts: `<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">`
+- Stylesheet: `<link rel="stylesheet" href="style.css">`
+And at the bottom of `<body>`:
+- Script: `<script src="script.js"></script>`
+- Icons init: `<script>lucide.createIcons();</script>`
 
-## 2. CRASH-PROOF JAVASCRIPT & AUDIO (CRITICAL)
-- NEVER refer to undeclared or uninitialized variables (e.g. `timerDisplay` before querying).
-- ALWAYS query DOM elements with null checks: `const display = document.getElementById('timer-display'); if (display) display.textContent = ...`
-- Wrap entire script in `document.addEventListener('DOMContentLoaded', () => { ... })`.
-- For audio sound effects, ALWAYS use Web Audio API oscillators (`new (window.AudioContext || window.webkitAudioContext)()`) so sounds work instantly without external mp3 files.
-- For circular progress rings, dynamically calculate SVG `strokeDasharray` and `strokeDashoffset` from the circle's radius (2 * PI * r).
+Using Tailwind CDN + Lucide Icons gives you an immediate superpower:
+- Rich utility styling: `bg-slate-950 text-slate-100 font-sans`
+- Glassmorphic panels: `bg-slate-900/60 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl`
+- Sleek gradient buttons: `bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-lg shadow-indigo-500/25`
+- Crisp vector icons: `<i data-lucide="play" class="w-4 h-4"></i>`, `<i data-lucide="rotate-ccw" class="w-4 h-4"></i>`, `<i data-lucide="check" class="w-4 h-4"></i>`, `<i data-lucide="trash-2" class="w-4 h-4"></i>`
 
-## 2. TYPOGRAPHY
-- ALWAYS import from Google Fonts via <link> in <head>.
-- Preferred combos:
-  * Headings: `Space Grotesk`, `Syne`, `Clash Display`, or `Outfit`
-  * Body: `Inter`, `Poppins`, or `Manrope`
-- Use clamp() for fluid font sizes: `font-size: clamp(1rem, 2.5vw, 1.25rem);`
-- Letter-spacing on headings: `letter-spacing: -0.02em;`
-- Line-height: 1.6–1.8 for body text.
+## 2. ZERO SHORTCUTS — 100% FEATURE COMPLETION (MANDATORY)
+Before writing code, extract EVERY SINGLE REQUIREMENT from the user prompt:
+- If configurable timer modes are requested (e.g. 25m, 5m, 15m), YOU MUST BUILD ALL MODES with interactive pill buttons.
+- If a progress ring is requested, YOU MUST BUILD an animated SVG circle ring (`stroke-dasharray`, `stroke-dashoffset`).
+- If an audio alert is requested, YOU MUST BUILD a Web Audio API synthesizer (`new (window.AudioContext || window.webkitAudioContext)()`) that plays a clean chime with zero external audio files. NEVER write `new Audio('alert.mp3')` with a missing file.
+- If task checklist / persistence is requested, YOU MUST BUILD complete add/toggle/delete logic backed by `localStorage`.
+- NEVER omit requested features. If the user asked for 4 features, build ALL 4 features completely!
 
-## 3. ANIMATIONS & INTERACTIVITY
-- CSS transitions on EVERYTHING interactive: `transition: all 0.3s ease;`
-- Fade-in on scroll using Intersection Observer (JavaScript).
-- Hero section: animated gradient background or floating particles/shapes.
-- Hover: cards lift with `transform: translateY(-6px); box-shadow: ...`
-- Buttons: gradient sweep on hover, or glow pulse.
-- Use @keyframes for: float, pulse, shimmer, slide-in, fade-up.
+## 3. LUXURY CUSTOM CSS in style.css
+`style.css` provides the luxury layer:
+- Ambient floating radial glow backgrounds:
+  .ambient-glow { position: fixed; border-radius: 50%; pointer-events: none; z-index: 0; filter: blur(100px); }
+  .glow-1 { width: 500px; height: 500px; background: rgba(99, 102, 241, 0.25); top: -150px; left: -150px; }
+  .glow-2 { width: 500px; height: 500px; background: rgba(168, 85, 247, 0.2); bottom: -150px; right: -150px; }
+- Circular SVG progress ring animations with `transition: stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1);`
+- Tabular figures for digital numbers: `font-variant-numeric: tabular-nums;`
+- Custom sleek scrollbars and checkbox transitions.
 
-## 4. FULL MULTI-FILE STRUCTURE
-- Always create SEPARATE files — never dump everything into one HTML file.
-- Standard structure:
-  * `index.html` — semantic HTML5 structure
-  * `style.css` — all styles with CSS variables
-  * `script.js` — interactivity, animations, logic
-  * `assets/` — images, icons (if needed)
-- Semantic HTML5: `<header>`, `<nav>`, `<main>`, `<section>`, `<article>`, `<footer>`
-- Fully responsive: CSS Grid + Flexbox + media queries.
-
-## 5. REAL CONTENT
-- Write genuine, contextually appropriate content. NO "Lorem ipsum". NO "placeholder text".
-- Create real headlines, real feature descriptions, real CTAs.
-- Include all standard sections: Hero, Features/About, How it works, Testimonials (if relevant), CTA, Footer.
-
-## 6. ALWAYS OPEN PREVIEW
-- After completing all files, ALWAYS call `open_browser` on `index.html` so the user instantly sees their site.
-
+## 4. CRASH-PROOF JAVASCRIPT in script.js
+- Wrap in `document.addEventListener('DOMContentLoaded', () => { ... })`.
+- Safely query every DOM element before use.
+- Zero undeclared variables. Zero placeholder comments.
 
 ╔══════════════════════════════════════════════╗
 ║   EDITING EXISTING FILES — MANDATORY RULES   ║
