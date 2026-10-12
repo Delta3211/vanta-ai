@@ -843,9 +843,12 @@ class AgentThread(QThread):
             else:
                 ws_files_str = "  (Workspace is empty — create files as needed)"
 
-            sys_prompt = LUNA_AGENT_SYSTEM_PROMPT.format(
-                workspace_path=str(self.workspace.root),
-                workspace_files=ws_files_str
+            sys_prompt = (
+                LUNA_AGENT_SYSTEM_PROMPT
+                .replace("{workspace_path}", str(self.workspace.root))
+                .replace("{workspace_files}", ws_files_str)
+                .replace("{{", "{")
+                .replace("}}", "}")
             )
             if not self.messages or not isinstance(self.messages[0], SystemMessage):
                 self.messages.insert(0, SystemMessage(content=sys_prompt))
